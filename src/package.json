@@ -1,0 +1,40 @@
+{
+  "name": "ar-backend",
+  "version": "5.0.0",
+  "description": "AR App - الشبكة الاجتماعية الجزائرية",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "seed": "node scripts/seed-owner.js",
+    "migrate": "node scripts/run-migrations.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "redis": "^4.7.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^9.0.5",
+    "zod": "^3.23.8",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.3.1",
+    "compression": "^1.7.4",
+    "morgan": "^1.10.0",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.35.3",
+    "@aws-sdk/client-s3": "^3.614.0",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.3",
+    "zxcvbn": "^4.4.2",
+    "ua-parser-js": "^1.0.38",
+    "argon2": "^0.41.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

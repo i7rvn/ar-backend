@@ -1,0 +1,114 @@
+version: '3.9'
+
+# ═══════════════════════════════════════════════════════════════
+# AR App — Docker Compose المبسّط
+#
+# ملاحظة تصميمية: هذا الملف يشغّل ثلاث خدمات فقط: API وPostgreSQL
+# وRedis. الخدمات التي كانت منفصلة (Go, Rust, Meilisearch, Prometheus,
+# Grafana, Nginx) أُزيلت لأن وظائفها انتقلت داخل عملية Node.js نفسها
+# (WebSocket، التشفير، البحث، المقاييس)، أو لأنها غير ضرورية لتشغيل
+# المشروع على استضافة مجانية واحدة. خدمة backup اختيارية، تبقى مفيدة
+# فقط عند تشغيل PostgreSQL محلياً عبر هذا الملف نفسه، وليس عند
+# استخدام قاعدة بيانات مُدارة مثل Neon (التي تدير نسخها الاحتياطية
+# بنفسها).
+# ═══════════════════════════════════════════════════════════════
+
+services:
+
+  api:
+    build: ./src
+    container_name: ar_api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ar_network
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ar_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ar_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ar_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ar_network
+
+  # نسخ احتياطي دوري، مطلوب فقط عند تشغيل postgres بهذا الملف نفسه
+  backup:
+    image: postgres:16-alpine
+    container_name: ar_backup
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - backup_logs:/var/log
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ar_network
+    command: >
+      sh -c "
+      apk add --no-cache aws-cli curl &&
+      echo '0 3 * * * /backup.sh >> /var/log/ar-backup.log 2>&1' | crontab - &&
+      crond -f -l 2
+      "
+
+volumes:
+  postgres_data:
+  redis_data:
+  backup_logs:
+
+networks:
+  ar_network:
+    driver: bridge
