@@ -60,6 +60,14 @@ const notificationPreferencesRoutes = require('./modules/notifications/preferenc
 const communitiesRoutes = require('./modules/communities/communities.routes');
 const statsRoutes = require('./modules/stats/stats.routes');
 
+// ─── Routes جديدة لدعم Admin Dashboard الكامل ───────────────────
+const dashboardUsersRoutes = require('./modules/admin/dashboardUsers.routes');
+const dashboardPostsRoutes = require('./modules/admin/dashboardPosts.routes');
+const dashboardCommunitiesRoutes = require('./modules/admin/dashboardCommunities.routes');
+const vpnLogsRoutes = require('./modules/admin/vpnLogs.routes');
+const inviteCodesRoutes = require('./modules/admin/inviteCodes.routes');
+const telegramSettingsRoutes = require('./modules/admin/telegramSettings.routes');
+
 const { query } = require('./config/database');
 
 const app = express();
@@ -86,8 +94,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// ─── CORS — نطاقات متعددة مسموحة (موقع المستخدمين + الداشبورد) ──
+// كانت مبنية على أصل واحد فقط (FRONTEND_URL)، ما تكفيش دابا بعد
+// إضافة الداشبورد كموقع منفصل بنطاق مختلف. الحماية الحقيقية هنا
+// مزدوجة: هذا الفحص + X-Client-Key (بمنتصف requireClientKey) اللي
+// يربط كل مفتاح بمساره المسموح فقط.
+const ALLOWED_ORIGINS = [process.env.FRONTEND_URL, process.env.DASHBOARD_URL].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin(origin, callback) {
+    // بلا Origin (طلبات من أدوات كيما curl/Postman أو نفس السيرفر) — نسمح
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error('غير مسموح من هذا النطاق (CORS)'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Key'],
@@ -103,6 +122,9 @@ app.use(metricsMiddleware);
 
 // ─── فحص الصحة يبقى متاحاً بلا مفتاح عميل (تحتاجه منصة الاستضافة) ──
 app.use('/api/health', healthRoutes);
+
+// ⚠️ أداة تشخيص مؤقتة — احذف هذا السطر + الملف بعد حل مشكلة client keys
+app.use('/api/_debug', require('./modules/debugClientKeys.routes'));
 
 // ─── مفتاح العميل + Rate Limiting + VPN ────────────────────────
 app.use('/api/', requireClientKey);
@@ -125,6 +147,12 @@ app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/security-logs-v2', adminSecurityRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/encryption', encryptionSectionsRoutes);
+app.use('/api/admin/users', dashboardUsersRoutes);
+app.use('/api/admin/posts', dashboardPostsRoutes);
+app.use('/api/admin/communities', dashboardCommunitiesRoutes);
+app.use('/api/admin/vpn-logs', vpnLogsRoutes);
+app.use('/api/admin/invite-codes', inviteCodesRoutes);
+app.use('/api/admin/telegram-settings', telegramSettingsRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.use('/api/posts', postsRoutes);
@@ -166,6 +194,31 @@ async function start() {
   try {
     await connectDB();
     await connectRedis();
+
+    // بوتستراب تلقائي اختياري: يشغّل migrations + seed-owner عند
+    // إقلاع السيرفر نفسه — مصمَّم خصيصاً لمنصات بلا Shell ولا
+    // pre-deploy command (Render Free Tier مثلاً). كلاهما idempotent
+    // (يتحقق "موجود مسبقاً" قبل أي INSERT)، فتفعيله بشكل دائم بلا
+    // خطر حتى بعد أول نشر — بس يضيف ثوانٍ قليلة لكل إقلاع.
+    // فعّله بمتغير بيئة AUTO_MIGRATE_AND_SEED=true بـ Render فقط؛
+    // بـ Docker Compose المحلي migrations تتطبّق أصلاً عبر
+    // docker-entrypoint-initdb.d، فما تحتاجوش هنا (اختياري كيفما تحب).
+    if (process.env.AUTO_MIGRATE_AND_SEED === 'true') {
+      logger.info('AUTO_MIGRATE_AND_SEED مفعّل — تشغيل migrations + seed-owner...');
+      try {
+        const { runMigrations } = require('./scripts/run-migrations');
+        await runMigrations();
+        const { main: seedMain } = require('./scripts/seed-owner');
+        await seedMain();
+        logger.info('انتهى البوتستراب التلقائي بنجاح.');
+      } catch (bootstrapErr) {
+        logger.error('فشل البوتستراب التلقائي (migrations/seed):', bootstrapErr.message);
+        // ما نوقفوش السيرفر بالكامل هنا — لو migrations اتطبّقت مسبقاً
+        // بطريقة يدوية، فشل جزء منها لاحقاً (مثلاً كود تعديل خفيف)
+        // ماشي سبب كافي يمنع السيرفر من الإقلاع أصلاً
+      }
+    }
+
     attachWebSocketServer(httpServer);
 
     httpServer.listen(PORT, () => {
