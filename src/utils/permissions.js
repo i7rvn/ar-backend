@@ -1,0 +1,33 @@
+// تعريف مركزي لكل الصلاحيات المتاحة بالنظام — يُستخدم بالتحقق ومزامنة القاعدة
+const PERMISSIONS = {
+ USERS_VIEW: 'users.view',
+ USERS_BAN: 'users.ban',
+ USERS_UNBAN: 'users.unban',
+ USERS_VERIFY: 'users.verify',
+ USERS_DELETE: 'users.delete',
+ USERS_IMPERSONATE: 'users.impersonate',
+ POSTS_VIEW: 'posts.view',
+ POSTS_DELETE: 'posts.delete',
+ COMMUNITIES_VIEW: 'communities.view',
+ COMMUNITIES_DELETE: 'communities.delete',
+ REPORTS_VIEW: 'reports.view',
+ ADMINS_CREATE: 'admins.create',
+ ADMINS_EDIT: 'admins.edit',
+ ADMINS_DELETE: 'admins.delete',
+ PERMISSIONS_MANAGE: 'permissions.manage',
+ AUDIT_VIEW: 'audit.view',
+ SECURITY_VIEW: 'security.view',
+ SECURITY_EVENTS_VIEW: 'security_events.view',
+ SECURITY_BLOCK_IP: 'security.block_ip',
+ TRUSTED_IPS_MANAGE: 'trusted_ips.manage',
+ CONTENT_MODERATE: 'content.moderate',
+ SETTINGS_MANAGE: 'settings.manage',
+ STATS_VIEW: 'stats.view',
+ MASTER_KEY_UNLOCK: 'master_key.unlock',
+ INVITE_CODES_CREATE: 'invite_codes.create',
+ INVITE_CODES_VIEW: 'invite_codes.view',
+ INVITE_CODES_REVOKE: 'invite_codes.revoke',
+ WILDCARD: '*',
+};
+
+module.exports = { PERMISSIONS };
