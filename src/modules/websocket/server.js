@@ -105,6 +105,28 @@ async function validateSocketSession(ws, force = false) {
   return session;
 }
 
+async function revalidateSocketRooms(ws) {
+  if (!ws.rooms.size) return;
+
+  const roomIds = Array.from(ws.rooms);
+  const { query } = require('../../config/database');
+  const result = await query(
+    `SELECT conversation_id
+     FROM conversation_members
+     WHERE user_id = $1 AND conversation_id = ANY($2::uuid[])`,
+    [ws.userId, roomIds]
+  );
+
+  const authorizedRooms = new Set(result.rows.map((row) => row.conversation_id));
+  for (const roomId of roomIds) {
+    if (!authorizedRooms.has(roomId)) {
+      removeFromMap(roomConnections, roomId, ws);
+      ws.rooms.delete(roomId);
+      sendJSON(ws, 'room:revoked', { conversationId: roomId });
+    }
+  }
+}
+
 async function persistDelivery(messageId, conversationId, userId) {
   const { query } = require('../../config/database');
 
@@ -281,6 +303,7 @@ function attachWebSocketServer(httpServer) {
         ws.sessionCheckTimer = setInterval(async () => {
           try {
             await validateSocketSession(ws, true);
+            await revalidateSocketRooms(ws);
           } catch (err) {
             ws.close(4001, 'session revoked');
           }
