@@ -95,7 +95,10 @@ function checkRateLimit(ws, type) {
   return true;
 }
 
-async function validateSocketSession(ws) {
+async function validateSocketSession(ws, force = false) {
+  if (!force && ws.sessionValidatedAt && Date.now() - ws.sessionValidatedAt < SESSION_REVALIDATION_MS) {
+    return { user: ws.user, deviceId: ws.deviceId };
+  }
   const session = await authenticateAccessToken(ws.token);
   ws.sessionValidatedAt = Date.now();
   ws.deviceId = session.deviceId;
@@ -277,7 +280,7 @@ function attachWebSocketServer(httpServer) {
         ws.rateWindow = { startedAt: Date.now(), count: 0, joinsStartedAt: Date.now(), joins: 0 };
         ws.sessionCheckTimer = setInterval(async () => {
           try {
-            await validateSocketSession(ws);
+            await validateSocketSession(ws, true);
           } catch (err) {
             ws.close(4001, 'session revoked');
           }
