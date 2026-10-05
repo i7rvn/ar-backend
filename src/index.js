@@ -26,6 +26,7 @@ const { globalLimiter } = require('./middleware/rateLimit');
 const { vpnGuard } = require('./middleware/vpn');
 const { metricsMiddleware, updateDBMetrics, setActiveUsers } = require('./config/metrics');
 const { requireClientKey } = require('./middleware/clientAuth');
+const { assertProductionSecurityConfig } = require('./config/security');
 const { attachWebSocketServer, getOnlineUserIds } = require('./modules/websocket/server');
 
 // ─── Routes ───────────────────────────────────────────────────
@@ -69,15 +70,6 @@ const inviteCodesRoutes = require('./modules/admin/inviteCodes.routes');
 const telegramSettingsRoutes = require('./modules/admin/telegramSettings.routes');
 
 const { query } = require('./config/database');
-
-function assertProductionSecurityConfig() {
-  if (process.env.NODE_ENV === 'production' &&
-      process.env.SKIP_OTP_VERIFICATION === 'true') {
-    throw new Error(
-      'SECURITY CONFIGURATION ERROR: SKIP_OTP_VERIFICATION=true is forbidden in production'
-    );
-  }
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
