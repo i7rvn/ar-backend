@@ -36,6 +36,21 @@ async function getOrCreateDirectConversation(userId1, userId2) {
  });
 }
 
+// ─── التحقق الموحد من عضوية المحادثة ───────────────────────────
+async function assertConversationMember(conversationId, userId) {
+ const member = await query(
+  `SELECT 1
+   FROM conversation_members
+   WHERE conversation_id = $1 AND user_id = $2
+   LIMIT 1`,
+  [conversationId, userId]
+ );
+ if (!member.rows.length) {
+  throw { status: 403, message: 'لست عضواً في هذه المحادثة', code: 'CONVERSATION_FORBIDDEN' };
+ }
+ return true;
+}
+
 // ─── إنشاء مجموعة ────────────────────────────────────────────
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -273,6 +288,7 @@ async function deleteMessage(messageId, userId) {
 }
 
 module.exports = {
+ assertConversationMember,
  getOrCreateDirectConversation,
  createGroupConversation,
  getUserConversations,
