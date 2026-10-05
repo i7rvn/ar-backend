@@ -1,4 +1,5 @@
-const { WebSocketServer } = require('ws');
+const WebSocket = require('ws');
+const { WebSocketServer } = WebSocket;
 const url = require('url');
 const { z } = require('zod');
 const { client: redisClient } = require('../../config/redis');
@@ -24,7 +25,11 @@ const clientEventSchema = z.discriminatedUnion('type', [
     payload: z.object({ conversationId: z.string().uuid() }).strict(),
   }).strict(),
   z.object({
-    type: z.union([z.literal('typing:start'), z.literal('typing:stop')]),
+    type: z.literal('typing:start'),
+    payload: z.object({ conversationId: z.string().uuid() }).strict(),
+  }).strict(),
+  z.object({
+    type: z.literal('typing:stop'),
     payload: z.object({ conversationId: z.string().uuid() }).strict(),
   }).strict(),
   z.object({
@@ -57,7 +62,7 @@ function removeFromMap(map, key, ws) {
 }
 
 function sendJSON(ws, type, payload) {
-  if (ws.readyState === ws.OPEN) {
+  if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type, payload }));
   }
 }
@@ -72,12 +77,17 @@ function rejectUpgrade(socket, statusCode = 401, message = 'Unauthorized') {
 function checkRateLimit(ws, type) {
   const now = Date.now();
 
-  if (!ws.rateWindow || now - ws.rateWindow.startedAt >= 1000) {
-    ws.rateWindow = { startedAt: now, count: 0, joinsStartedAt: now, joins: 0 };
+  if (!ws.rateWindow || now - ws.rateWindow.eventsStartedAt >= 1000) {
+    ws.rateWindow = {
+      eventsStartedAt: now,
+      events: 0,
+      joinsStartedAt: ws.rateWindow?.joinsStartedAt || now,
+      joins: ws.rateWindow?.joins || 0,
+    };
   }
 
-  ws.rateWindow.count += 1;
-  if (ws.rateWindow.count > DEFAULT_EVENTS_PER_SECOND) {
+  ws.rateWindow.events += 1;
+  if (ws.rateWindow.events > DEFAULT_EVENTS_PER_SECOND) {
     return false;
   }
 
@@ -299,7 +309,7 @@ function attachWebSocketServer(httpServer) {
         ws.token = token;
         ws.deviceId = session.deviceId;
         ws.rooms = new Set();
-        ws.rateWindow = { startedAt: Date.now(), count: 0, joinsStartedAt: Date.now(), joins: 0 };
+        ws.rateWindow = { eventsStartedAt: Date.now(), events: 0, joinsStartedAt: Date.now(), joins: 0 };
         ws.sessionCheckTimer = setInterval(async () => {
           try {
             await validateSocketSession(ws, true);
