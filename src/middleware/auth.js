@@ -3,6 +3,76 @@ const logger = require('../config/logger');
 const { isTokenBlacklisted } = require('../config/redis');
 const { query } = require('../config/database');
 
+function authError(status, message, code) {
+  return { status, message, code };
+}
+
+async function authenticateAccessToken(token) {
+  if (typeof token !== 'string' || !token.trim()) {
+    throw authError(401, 'يجب تسجيل الدخول أولاً', 'NO_TOKEN');
+  }
+
+  const blacklisted = await isTokenBlacklisted(token);
+  if (blacklisted) {
+    throw authError(401, 'انتهت صلاحية الجلسة، سجل دخولك مجدداً', 'TOKEN_REVOKED');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      throw authError(401, 'انتهت صلاحية الجلسة', 'TOKEN_EXPIRED');
+    }
+    throw authError(401, 'جلسة غير صالحة', 'INVALID_TOKEN');
+  }
+
+  if (!decoded?.userId) {
+    throw authError(401, 'جلسة غير صالحة', 'INVALID_TOKEN');
+  }
+
+  const result = await query(
+    `SELECT id, email, username, display_name, avatar_url,
+      is_verified, is_admin, is_banned, token_version
+     FROM users WHERE id = $1`,
+    [decoded.userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw authError(401, 'المستخدم غير موجود', 'USER_NOT_FOUND');
+  }
+
+  const user = result.rows[0];
+
+  if (user.is_banned) {
+    throw authError(403, 'حسابك موقوف', 'ACCOUNT_BANNED');
+  }
+
+  if ((decoded.tv || 0) !== (user.token_version || 0)) {
+    throw authError(401, 'انتهت صلاحية الجلسة، سجل دخولك مجدداً', 'TOKEN_VERSION_MISMATCH');
+  }
+
+  if (decoded.did) {
+    const deviceCheck = await query(
+      `SELECT revoked_at
+       FROM sessions_devices
+       WHERE id = $1 AND user_id = $2`,
+      [decoded.did, user.id]
+    );
+
+    if (deviceCheck.rows.length === 0 || deviceCheck.rows[0].revoked_at) {
+      throw authError(401, 'تم تسجيل الخروج من هذا الجهاز', 'SESSION_REVOKED');
+    }
+  }
+
+  return {
+    user,
+    token,
+    deviceId: decoded.did || null,
+    decoded,
+  };
+}
+
 async function authenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -14,95 +84,24 @@ async function authenticate(req, res, next) {
       });
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.slice(7).trim();
+    const session = await authenticateAccessToken(token);
 
-    // تحقق من القائمة السوداء
-    const blacklisted = await isTokenBlacklisted(token);
-    if (blacklisted) {
-      return res.status(401).json({
-        success: false,
-        message: 'انتهت صلاحية الجلسة، سجل دخولك مجدداً',
-        code: 'TOKEN_REVOKED',
-      });
-    }
-
-    // التحقق من الـ token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // جلب المستخدم من القاعدة (token_version للإبطال الفوري الشامل)
-    const result = await query(
-      `SELECT id, email, username, display_name, avatar_url,
-      is_verified, is_admin, is_banned, token_version
-      FROM users WHERE id = $1`,
-      [decoded.userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'المستخدم غير موجود',
-        code: 'USER_NOT_FOUND',
-      });
-    }
-
-    const user = result.rows[0];
-
-    if (user.is_banned) {
-      return res.status(403).json({
-        success: false,
-        message: 'حسابك موقوف',
-        code: 'ACCOUNT_BANNED',
-      });
-    }
-
-    // token_version: لو تغيّر (تغيير كلمة سر، حظر، "إبطال كل الأجهزة")
-    // بعد إصدار هذا التوكن، يُرفض فوراً بلا انتظار انتهاء صلاحيته الطبيعية
-    if ((decoded.tv || 0) !== (user.token_version || 0)) {
-      return res.status(401).json({
-        success: false,
-        message: 'انتهت صلاحية الجلسة، سجل دخولك مجدداً',
-        code: 'TOKEN_VERSION_MISMATCH',
-      });
-    }
-
-    // ربط الجهاز: لو التوكن مرتبط بجلسة جهاز مُبطلة (تسجيل خروج عن
-    // بُعد من هذا الجهاز بالذات)، يُرفض حتى لو التوكن نفسه لسه صالح
-    if (decoded.did) {
-      const deviceCheck = await query(
-        `SELECT revoked_at FROM sessions_devices WHERE id = $1 AND user_id = $2`,
-        [decoded.did, user.id]
-      );
-      if (deviceCheck.rows.length === 0 || deviceCheck.rows[0].revoked_at) {
-        return res.status(401).json({
-          success: false,
-          message: 'تم تسجيل الخروج من هذا الجهاز',
-          code: 'SESSION_REVOKED',
-        });
-      }
-    }
-
-    req.user = user;
-    req.token = token;
-    req.deviceId = decoded.did || null;
+    req.user = session.user;
+    req.token = session.token;
+    req.deviceId = session.deviceId;
+    req.auth = session.decoded;
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'انتهت صلاحية الجلسة',
-        code: 'TOKEN_EXPIRED',
-      });
-    }
     logger.error('خطأ في المصادقة:', err);
-    return res.status(401).json({
+    return res.status(err.status || 401).json({
       success: false,
-      message: 'جلسة غير صالحة',
-      code: 'INVALID_TOKEN',
+      message: err.message || 'جلسة غير صالحة',
+      code: err.code || 'INVALID_TOKEN',
     });
   }
 }
 
-// middleware للأدمن فقط
 async function requireAdmin(req, res, next) {
   await authenticate(req, res, async () => {
     if (!req.user?.is_admin) {
@@ -116,4 +115,4 @@ async function requireAdmin(req, res, next) {
   });
 }
 
-module.exports = { authenticate, requireAdmin };
+module.exports = { authenticate, authenticateAccessToken, requireAdmin };
