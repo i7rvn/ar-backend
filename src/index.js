@@ -70,6 +70,15 @@ const telegramSettingsRoutes = require('./modules/admin/telegramSettings.routes'
 
 const { query } = require('./config/database');
 
+function assertProductionSecurityConfig() {
+  if (process.env.NODE_ENV === 'production' &&
+      process.env.SKIP_OTP_VERIFICATION === 'true') {
+    throw new Error(
+      'SECURITY CONFIGURATION ERROR: SKIP_OTP_VERIFICATION=true is forbidden in production'
+    );
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -199,6 +208,7 @@ const httpServer = http.createServer(app);
 
 async function start() {
   try {
+    assertProductionSecurityConfig();
     await connectDB();
     await connectRedis();
 
