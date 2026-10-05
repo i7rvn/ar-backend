@@ -29,3 +29,15 @@ test('WebSocket rejects unknown fields in event payloads', () => {
   });
   assert.equal(result.success, false);
 });
+
+
+test('WebSocket rate limiter blocks excessive room joins in one minute', () => {
+  const { checkRateLimit } = require('../modules/websocket/server');
+  const ws = {};
+  let allowed = 0;
+  for (let i = 0; i < 20; i += 1) {
+    if (checkRateLimit(ws, 'join:room')) allowed += 1;
+  }
+  assert.equal(allowed, 20);
+  assert.equal(checkRateLimit(ws, 'join:room'), false);
+});
