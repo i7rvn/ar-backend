@@ -378,4 +378,5 @@ module.exports = {
   attachWebSocketServer,
   getOnlineUserIds,
   clientEventSchema,
+  checkRateLimit,
 };
