@@ -35,6 +35,19 @@ async function saveHashtags(client, postId, content) {
 }
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
+async function assertPostAccessible(client, postId, userId) {
+ const visible = await client.query(
+  `SELECT p.id FROM posts p
+   WHERE p.id = $1 AND p.is_deleted = FALSE
+   ${buildVisibilityClause(2, { includeUnlisted: true })}`,
+  [postId, userId]
+ );
+ if (!visible.rows.length) {
+  throw { status: 403, message: 'المنشور غير متاح لك', code: 'POST_FORBIDDEN' };
+ }
+ return true;
+}
+
 async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null, poll = null, visibility = 'public' }) {
   const normalizedVisibility = normalizeVisibility(visibility);
   const { isSensitive: normalizedSensitive, sensitiveWarning: normalizedSensitiveWarning } =
@@ -56,8 +69,9 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
  }
  }
 
- // إذا ريتويت — تحقق من وجود المنشور الأصلي
+ // إذا ريتويت — تحقق من وجود المنشور الأصلي وصلاحية رؤيته
  if (repostOfId) {
+ await assertPostAccessible(client, repostOfId, userId);
  const orig = await client.query(
  'SELECT id FROM posts WHERE id=$1 AND is_deleted=FALSE', [repostOfId]
  );
@@ -83,6 +97,9 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
 
  return { reposted: true, postId: repostOfId };
  }
+
+ if (replyToId) await assertPostAccessible(client, replyToId, userId);
+ if (quoteOfId) await assertPostAccessible(client, quoteOfId, userId);
 
  // منشور عادي
  const result = await client.query(
@@ -143,6 +160,7 @@ async function getPost(postId, viewerId = null) {
    LEFT JOIN users ru ON rp.user_id = ru.id
    WHERE p.id = $1 AND p.is_deleted = FALSE`;
  if (viewerId) sql += buildVisibilityClause(2, { includeUnlisted: true });
+ else sql += " AND p.visibility IN ('public', 'unlisted')";
 
  const result = await query(sql, viewerId ? [postId, viewerId] : [postId]);
  if (!result.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
@@ -233,9 +251,16 @@ async function getReplies(postId, viewerId = null, page = 1, limit = 20) {
  // المنشور نفسه (يشوف كل شيء) وصاحب الرد نفسه (بلا ما يعرف إنه مقيَّد)
  const postOwner = await query('SELECT user_id FROM posts WHERE id=$1', [postId]);
  const ownerId = postOwner.rows[0]?.user_id;
+ if (!ownerId) throw { status: 404, message: 'المنشور غير موجود' };
+ const rootVisible = viewerId
+ ? await query(`SELECT p.id FROM posts p WHERE p.id = $1 AND p.is_deleted = FALSE ${buildVisibilityClause(2, { includeUnlisted: true })}`, [postId, viewerId])
+ : await query(`SELECT p.id FROM posts p WHERE p.id = $1 AND p.is_deleted = FALSE AND p.visibility IN ('public', 'unlisted')`, [postId]);
+ if (!rootVisible.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
 
  // ownerId مصدره عمود UUID من قاعدة بياناتنا (ماشي مُدخَل مستخدم
  // مباشر)، فحقنه بالنص هنا آمن؛ viewerId يبقى دايماً parameter مُقيَّم
+ const visibilityCondition = viewerId ? buildVisibilityClause(3, { includeUnlisted: true }) : "AND p.visibility IN ('public', 'unlisted')";
+
  const restrictCondition = (ownerId && viewerId)
  ? `AND (
  p.user_id = $4
@@ -257,6 +282,7 @@ async function getReplies(postId, viewerId = null, page = 1, limit = 20) {
  FROM posts p
  JOIN users u ON p.user_id = u.id
  WHERE p.reply_to_id = $1 AND p.is_deleted = FALSE
+ ${visibilityCondition}
  ${restrictCondition}
  ORDER BY p.created_at ASC
  LIMIT $2 OFFSET ${offset}`,
