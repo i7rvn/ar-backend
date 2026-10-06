@@ -10,10 +10,11 @@ const {
 } = require('../../config/redis');
 const { sendOTPEmail } = require('../../config/email');
 const { sendOTPWhatsApp } = require('../../config/whatsapp');
+const { isOtpVerificationEnabled } = require('../../config/security');
 
 // ─── توليد OTP ────────────────────────────────────────────────
 function generateOTP() {
- return Math.floor(100000 + Math.random() * 900000).toString();
+ return crypto.randomInt(100000, 1000000).toString();
 }
 
 // ─── توليد JWT ────────────────────────────────────────────────
@@ -153,20 +154,20 @@ async function register({ email, username, password, display_name, invite_code, 
  // مفعّل: أي حد يقدر يسجّل بأي إيميل/رقم بلا أي تحقق فعلي من ملكيته
  // (بريد مزيّف، حسابات وهمية بالجملة). فعّلها فقط للمدة الضرورية،
  // وأطفئها فوراً بعد توثيق الدومين — راجع .env.example للتفاصيل.
- const skipOtpCheck = process.env.SKIP_OTP_VERIFICATION === 'true';
+ const otpVerificationEnabled = isOtpVerificationEnabled();
 
  // تحقق أن OTP اتأكد فعلاً لنفس القناة والمعرِّف قبل إنشاء أي حساب —
  // بلا هذا الفحص، أي حد يقدر يستدعي /auth/register مباشرة بلا ما
  // يمر أصلاً من /auth/verify-otp (ثغرة كانت موجودة بالكود الأصلي)
  const verifiedIdentifier = otp_channel === 'whatsapp' ? phone_number : email;
- if (req.headers && !skipOtpCheck) { // فقط لطلبات HTTP حقيقية، ماشي سكربتات داخلية
+ if (req.headers && otpVerificationEnabled) { // فقط لطلبات HTTP حقيقية، ماشي سكربتات داخلية
  const { getCache, deleteCache } = require('../../config/redis');
  const verifiedFlag = await getCache(`otp_verified:${otp_channel}:${verifiedIdentifier}`);
  if (!verifiedFlag) {
  throw { status: 400, message: 'لازم تتحقق من رمز التأكيد أولاً', code: 'OTP_NOT_VERIFIED' };
  }
  await deleteCache(`otp_verified:${otp_channel}:${verifiedIdentifier}`); // استهلاك لمرة وحدة
- } else if (skipOtpCheck) {
+ } else if (!otpVerificationEnabled) {
  logger.warn(`تسجيل بلا تحقق OTP (SKIP_OTP_VERIFICATION مفعّل) — ${email || phone_number}`);
  }
 

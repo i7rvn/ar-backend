@@ -6,6 +6,7 @@ const express = require('express');
 const { authenticate } = require('../../middleware/auth');
 const { optionalAuthenticate } = require('../../middleware/optionalAuth');
 const { query } = require('../../config/database');
+const { buildVisibilityClause } = require('../posts/postVisibility');
 
 const router = express.Router();
 
@@ -161,8 +162,9 @@ router.get('/:slug/posts', optionalAuthenticate, async (req, res) => {
     `SELECT p.*, u.username, u.display_name, u.avatar_url, u.is_verified
      FROM posts p JOIN users u ON p.user_id = u.id
      WHERE p.community_id = $1 AND p.is_deleted = FALSE
+     ${req.user ? buildVisibilityClause(4) : "AND p.visibility = 'public'"}
      ORDER BY p.created_at DESC LIMIT $2 OFFSET $3`,
-    [communityResult.rows[0].id, limit, offset]
+    req.user ? [communityResult.rows[0].id, limit, offset, req.user.id] : [communityResult.rows[0].id, limit, offset]
   );
 
   res.json({ success: true, posts: posts.rows });

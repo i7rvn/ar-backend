@@ -3,8 +3,40 @@ const messagesService = require('./messages.service');
 const { authenticate } = require('../../middleware/auth');
 const { respond, asyncHandler } = require('../../utils/helpers');
 const { query } = require('../../config/database');
+const { z } = require('zod');
+const reactionsService = require('./messageReactions.service');
+const { editMessage } = require('./messageEditing.service');
+const { pinMessage, unpinMessage, listPinnedMessages } = require('./messagePinning.service');
 
 const router = express.Router();
+
+const sendMessageSchema = z.object({
+ conversationId: z.string().uuid(),
+ encryptedContent: z.string().min(1).max(700000),
+ nonce: z.string().min(8).max(128),
+ msgType: z.enum(['text', 'image', 'video', 'audio', 'file']).optional(),
+ mediaUrl: z.string().url().max(500).optional(),
+ replyToId: z.string().uuid().optional(),
+ expiresIn: z.coerce.number().int().min(0).max(30 * 24 * 60 * 60).optional(),
+ encryptionVersion: z.coerce.number().int().min(1).max(2).default(2),
+ encryptionAlgorithm: z.string().max(40).default('RSA-OAEP-256'),
+ keyEnvelopes: z.array(z.object({
+  recipientUserId: z.string().uuid(),
+  keyId: z.string().uuid(),
+  encryptedMessageKey: z.string().min(16).max(2048),
+ }).strict()).max(100).default([]),
+}).strict();
+
+const editMessageSchema = z.object({
+ encryptedContent: z.string().min(1).max(700000),
+ nonce: z.string().min(8).max(128),
+}).strict();
+
+const reactionSchema = z.object({
+ reaction: z.enum(['👍', '❤️', '😂', '😢', '😡', '😮', '👎']),
+}).strict();
+
+
 
 // كل مسارات الرسائل محمية
 router.use(authenticate);
@@ -68,24 +100,67 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
 
 // ─── إرسال رسالة ─────────────────────────────────────────────
 router.post('/send', asyncHandler(async (req, res) => {
- const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn } = req.body;
-
- if (!conversationId || !encryptedContent || !nonce) {
- return respond.error(res, 'conversationId و encryptedContent و nonce مطلوبة', 400);
+ const parsed = sendMessageSchema.safeParse(req.body);
+ if (!parsed.success) {
+  return respond.error(res, 'بيانات الرسالة غير صالحة', 400, 'INVALID_MESSAGE_PAYLOAD');
  }
+ const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn, encryptionVersion, encryptionAlgorithm, keyEnvelopes } = parsed.data;
 
  const msg = await messagesService.sendMessage({
- conversationId,
- senderId: req.user.id,
- encryptedContent,
- nonce,
- msgType,
- mediaUrl,
- replyToId,
- expiresIn,
+  conversationId,
+  senderId: req.user.id,
+  encryptedContent,
+  nonce,
+  msgType,
+  mediaUrl,
+  replyToId,
+  expiresIn,
+  encryptionVersion,
+  encryptionAlgorithm,
+  keyEnvelopes,
  });
 
  respond.created(res, msg, 'تم إرسال الرسالة');
+}));
+
+router.patch('/:id', asyncHandler(async (req, res) => {
+ const parsed = editMessageSchema.safeParse(req.body);
+ if (!parsed.success) return respond.error(res, 'بيانات تعديل الرسالة غير صالحة', 400, 'INVALID_MESSAGE_EDIT');
+ const message = await editMessage(req.params.id, req.user.id, parsed.data.encryptedContent, parsed.data.nonce);
+ respond.ok(res, message, 'تم تعديل الرسالة');
+}));
+
+router.get('/conversations/:id/pinned', asyncHandler(async (req, res) => {
+ const messages = await listPinnedMessages(req.params.id, req.user.id);
+ respond.ok(res, messages);
+}));
+
+router.post('/:id/pin', asyncHandler(async (req, res) => {
+ const message = await pinMessage(req.params.id, req.user.id);
+ respond.ok(res, message, 'تم تثبيت الرسالة');
+}));
+
+router.delete('/:id/pin', asyncHandler(async (req, res) => {
+ const message = await unpinMessage(req.params.id, req.user.id);
+ respond.ok(res, message, 'تم إلغاء تثبيت الرسالة');
+}));
+
+// ─── تفاعلات الرسائل ──────────────────────────────────────────
+router.get('/:id/reactions', asyncHandler(async (req, res) => {
+ const reactions = await reactionsService.getMessageReactions(req.params.id, req.user.id);
+ respond.ok(res, reactions);
+}));
+
+router.post('/:id/reaction', asyncHandler(async (req, res) => {
+ const parsed = reactionSchema.safeParse(req.body);
+ if (!parsed.success) return respond.error(res, 'التفاعل غير صالح', 400, 'INVALID_MESSAGE_REACTION');
+ const reactions = await reactionsService.addMessageReaction(req.params.id, req.user.id, parsed.data.reaction);
+ respond.ok(res, reactions, 'تمت إضافة التفاعل');
+}));
+
+router.delete('/:id/reaction/:reaction', asyncHandler(async (req, res) => {
+ const reactions = await reactionsService.removeMessageReaction(req.params.id, req.user.id, req.params.reaction);
+ respond.ok(res, reactions, 'تم حذف التفاعل');
 }));
 
 // ─── حذف رسالة ───────────────────────────────────────────────

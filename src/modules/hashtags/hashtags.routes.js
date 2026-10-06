@@ -2,6 +2,8 @@ const express = require('express');
 const { query } = require('../../config/database');
 const { getCache, setCache } = require('../../config/redis');
 const { respond, asyncHandler } = require('../../utils/helpers');
+const { optionalAuthenticate } = require('../../middleware/optionalAuth');
+const { buildVisibilityClause } = require('../posts/postVisibility');
 
 const router = express.Router();
 
@@ -28,7 +30,7 @@ router.get('/trending', asyncHandler(async (req, res) => {
 }));
 
 // ─── منشورات هاشتاق معين ──────────────────────────────────────
-router.get('/:tag', asyncHandler(async (req, res) => {
+router.get('/:tag', optionalAuthenticate, asyncHandler(async (req, res) => {
  const tag = req.params.tag.toLowerCase().replace('#', '');
  const limit = parseInt(req.query.limit) || 20;
  const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
@@ -42,9 +44,10 @@ router.get('/:tag', asyncHandler(async (req, res) => {
  JOIN post_hashtags ph ON p.id = ph.post_id
  JOIN hashtags h ON ph.hashtag_id = h.id
  WHERE h.tag = $1 AND p.is_deleted = FALSE AND u.is_banned = FALSE
+ ${req.user ? buildVisibilityClause(4) : "AND p.visibility = 'public'"}
  ORDER BY p.created_at DESC
  LIMIT $2 OFFSET $3`,
- [tag, limit, offset]
+ req.user ? [tag, limit, offset, req.user.id] : [tag, limit, offset]
  );
 
  respond.ok(res, { tag, posts: result.rows });

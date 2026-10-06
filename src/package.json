@@ -7,7 +7,9 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "seed": "node scripts/seed-owner.js",
-    "migrate": "node scripts/run-migrations.js"
+    "migrate": "node scripts/run-migrations.js",
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/check-syntax.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.614.0",

@@ -26,6 +26,7 @@ const { globalLimiter } = require('./middleware/rateLimit');
 const { vpnGuard } = require('./middleware/vpn');
 const { metricsMiddleware, updateDBMetrics, setActiveUsers } = require('./config/metrics');
 const { requireClientKey } = require('./middleware/clientAuth');
+const { getSecurityRuntimeConfig } = require('./config/security');
 const { attachWebSocketServer, getOnlineUserIds } = require('./modules/websocket/server');
 
 // ─── Routes ───────────────────────────────────────────────────
@@ -59,6 +60,11 @@ const encryptionSectionsRoutes = require('./modules/admin/encryption.routes');
 const notificationPreferencesRoutes = require('./modules/notifications/preferences.routes');
 const communitiesRoutes = require('./modules/communities/communities.routes');
 const statsRoutes = require('./modules/stats/stats.routes');
+const wordFiltersRoutes = require('./modules/filters/wordFilters.routes');
+const linkPreviewRoutes = require('./modules/link-preview/linkPreview.routes');
+const e2eKeysRoutes = require('./modules/messages/e2eKeys.routes');
+const storiesRoutes = require('./modules/stories/stories.routes');
+ic=ic;
 
 // ─── Routes جديدة لدعم Admin Dashboard الكامل ───────────────────
 const dashboardUsersRoutes = require('./modules/admin/dashboardUsers.routes');
@@ -170,6 +176,8 @@ app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/messages/e2e-keys', e2eKeysRoutes);
+app.use('/api/stories', storiesRoutes);
 
 // ─── Routes إضافية ──────────────────────────────────────────────
 app.use('/api/2fa', twofaRoutes);
@@ -181,6 +189,8 @@ app.use('/api/account', accountRoutes);
 app.use('/api/notifications/preferences', notificationPreferencesRoutes);
 app.use('/api/communities', communitiesRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/word-filters', wordFiltersRoutes);
+app.use('/api/link-preview', linkPreviewRoutes);
 
 // ─── 404 + معالج الأخطاء ────────────────────────────────────────
 app.use((req, res) =>
@@ -199,6 +209,8 @@ const httpServer = http.createServer(app);
 
 async function start() {
   try {
+    const securityConfig = getSecurityRuntimeConfig();
+    logger.warn(`OTP verification ${securityConfig.otpVerificationEnabled ? 'enabled' : 'SKIPPED'} by runtime configuration`);
     await connectDB();
     await connectRedis();
 

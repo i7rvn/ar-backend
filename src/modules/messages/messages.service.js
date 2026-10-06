@@ -36,6 +36,21 @@ async function getOrCreateDirectConversation(userId1, userId2) {
  });
 }
 
+// ─── التحقق الموحد من عضوية المحادثة ───────────────────────────
+async function assertConversationMember(conversationId, userId) {
+ const member = await query(
+  `SELECT 1
+   FROM conversation_members
+   WHERE conversation_id = $1 AND user_id = $2
+   LIMIT 1`,
+  [conversationId, userId]
+ );
+ if (!member.rows.length) {
+  throw { status: 403, message: 'لست عضواً في هذه المحادثة', code: 'CONVERSATION_FORBIDDEN' };
+ }
+ return true;
+}
+
 // ─── إنشاء مجموعة ────────────────────────────────────────────
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -156,7 +171,16 @@ async function getMessages(conversationId, userId, page = 1, limit = 30) {
  u.username, u.display_name, u.avatar_url,
  EXISTS(SELECT 1 FROM message_reads WHERE message_id=m.id AND user_id=$2) AS read_by_me,
  (SELECT COUNT(*) FROM message_reads WHERE message_id=m.id) AS read_count,
- (SELECT COUNT(*) FROM message_deliveries WHERE message_id=m.id) AS delivered_count
+ (SELECT COUNT(*) FROM message_deliveries WHERE message_id=m.id) AS delivered_count,
+ COALESCE((
+   SELECT jsonb_agg(jsonb_build_object(
+     'messageId', e.message_id,
+     'keyId', e.key_id,
+     'encryptedMessageKey', e.encrypted_message_key
+   ))
+   FROM message_key_envelopes e
+   WHERE e.message_id = m.id AND e.recipient_user_id = $2
+ ), '[]'::jsonb) AS e2e_key_envelopes
  FROM messages m
  JOIN users u ON m.sender_id = u.id
  WHERE m.conversation_id = $1 AND m.is_deleted = FALSE
@@ -172,50 +196,94 @@ async function getMessages(conversationId, userId, page = 1, limit = 30) {
 }
 
 // ─── إرسال رسالة ─────────────────────────────────────────────
-async function sendMessage({ conversationId, senderId, encryptedContent, nonce, msgType = 'text', mediaUrl, replyToId, expiresIn }) {
- // تحقق العضوية
+async function sendMessage({ conversationId, senderId, encryptedContent, nonce, msgType = 'text', mediaUrl, replyToId, expiresIn, encryptionVersion = 2, encryptionAlgorithm = 'RSA-OAEP-256', keyEnvelopes = [] }) {
  const member = await query(
- `SELECT id FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
- [conversationId, senderId]
+  `SELECT id FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+  [conversationId, senderId]
  );
  if (!member.rows.length) throw { status: 403, message: 'لست عضواً في هذه المحادثة' };
 
+ if (![1, 2].includes(Number(encryptionVersion))) {
+  throw { status: 400, message: 'نسخة التشفير غير مدعومة', code: 'UNSUPPORTED_ENCRYPTION_VERSION' };
+ }
+ if (Number(encryptionVersion) === 1 && process.env.ALLOW_LEGACY_MESSAGE_ENCRYPTION !== 'true') {
+  throw { status: 426, message: 'يجب استخدام تشفير E2E الحديث لهذه الرسائل', code: 'E2E_REQUIRED' };
+ }
+
+ if (Number(encryptionVersion) === 2) {
+  if (encryptionAlgorithm !== 'RSA-OAEP-256') {
+   throw { status: 400, message: 'خوارزمية E2E غير مدعومة', code: 'UNSUPPORTED_E2E_ALGORITHM' };
+  }
+  if (!Array.isArray(keyEnvelopes)) {
+   throw { status: 400, message: 'مفاتيح الرسالة غير صالحة', code: 'INVALID_E2E_ENVELOPES' };
+  }
+
+  const members = await query(
+   `SELECT cm.user_id, k.id AS key_id
+    FROM conversation_members cm
+    LEFT JOIN user_e2e_keys k
+      ON k.user_id = cm.user_id AND k.revoked_at IS NULL
+    WHERE cm.conversation_id = $1`,
+   [conversationId]
+  );
+
+  const envelopeByUser = new Map();
+  for (const envelope of keyEnvelopes) {
+   if (envelopeByUser.has(envelope.recipientUserId)) {
+    throw { status: 400, message: 'يوجد envelope مكرر لنفس المستخدم', code: 'DUPLICATE_E2E_ENVELOPE' };
+   }
+   envelopeByUser.set(envelope.recipientUserId, envelope);
+  }
+
+  for (const row of members.rows) {
+   const envelope = envelopeByUser.get(row.user_id);
+   if (!row.key_id) {
+    throw { status: 428, message: 'بعض أعضاء المحادثة لم يسجلوا مفتاح E2E بعد', code: 'E2E_KEYS_INCOMPLETE' };
+   }
+   if (!envelope || envelope.keyId !== row.key_id) {
+    throw { status: 400, message: 'مفاتيح الرسالة لا تطابق مفاتيح أعضاء المحادثة', code: 'INVALID_E2E_ENVELOPES' };
+   }
+  }
+  if (envelopeByUser.size !== members.rows.length) {
+   throw { status: 400, message: 'لازم يكون للرسالة مفتاح مشفر لكل عضو في المحادثة', code: 'INVALID_E2E_ENVELOPES' };
+  }
+ }
+
  const expiresAt = expiresIn
- ? new Date(Date.now() + expiresIn * 1000)
- : null;
+  ? new Date(Date.now() + expiresIn * 1000)
+  : null;
+ const message = await withTransaction(async (client) => {
+  const inserted = await client.query(
+   `INSERT INTO messages
+    (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at, encryption_version, encryption_algorithm)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    RETURNING *`,
+   [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt, Number(encryptionVersion), Number(encryptionVersion) === 2 ? encryptionAlgorithm : 'legacy']
+  );
+  const created = inserted.rows[0];
 
- const result = await query(
- `INSERT INTO messages
- (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
- RETURNING *`,
- [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt]
+  await client.query(
+   `INSERT INTO message_reads (message_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+   [created.id, senderId]
+  );
+
+  if (Number(encryptionVersion) === 2) {
+   for (const envelope of keyEnvelopes) {
+    await client.query(
+     `INSERT INTO message_key_envelopes (message_id, recipient_user_id, key_id, encrypted_message_key)
+      VALUES ($1, $2, $3, $4)`,
+     [created.id, envelope.recipientUserId, envelope.keyId, envelope.encryptedMessageKey]
+    );
+   }
+  }
+
+  return created;
+ });
+
+ const sender = await query(
+  `SELECT username, display_name, avatar_url FROM users WHERE id = $1`,
+  [senderId]
  );
-
- const message = result.rows[0];
-
- // وضع الرسالة كـ "مقروء"للمرسل نفسه
- await query(
- `INSERT INTO message_reads (message_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
- [message.id, senderId]
- );
-
- // تحديث معاينة آخر رسالة ووقتها - تستخدمهما قائمة المحادثات للترتيب والعرض
- const previewText = msgType === 'text' ? encryptedContent.slice(0, 100) : `[${msgType}]`;
- await query(
- `UPDATE conversations SET last_msg_at = NOW(), last_msg_text = $1 WHERE id = $2`,
- [previewText, conversationId]
- );
-
- // زيادة عداد غير المقروء لباقي أعضاء المحادثة
- await query(
- `UPDATE conversation_members SET unread_count = unread_count + 1
- WHERE conversation_id = $1 AND user_id != $2`,
- [conversationId, senderId]
- );
-
- // بث الرسالة فورياً لباقي أعضاء المحادثة المتصلين
- const sender = await query(`SELECT username, display_name, avatar_url FROM users WHERE id = $1`, [senderId]);
  const { notifyNewMessage } = require('../websocket/publisher');
  notifyNewMessage(conversationId, message, sender.rows[0]).catch(() => {});
 
@@ -273,6 +341,7 @@ async function deleteMessage(messageId, userId) {
 }
 
 module.exports = {
+ assertConversationMember,
  getOrCreateDirectConversation,
  createGroupConversation,
  getUserConversations,
