@@ -6,6 +6,7 @@ const { query, withTransaction } = require('../../config/database');
 const { deleteCache } = require('../../config/redis');
 const logger = require('../../config/logger');
 const { normalizeContentWarning } = require('../../utils/postPayload');
+const { createPoll } = require('../polls/polls.service');
 
 // ─── استخراج الهاشتاقات من النص ──────────────────────────────
 function extractHashtags(text) {
@@ -33,7 +34,7 @@ async function saveHashtags(client, postId, content) {
 }
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
-async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null }) {
+async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null, poll = null }) {
   const { isSensitive: normalizedSensitive, sensitiveWarning: normalizedSensitiveWarning } =
     normalizeContentWarning(isSensitive, sensitiveWarning);
  return await withTransaction(async (client) => {
@@ -91,6 +92,7 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
 
  const post = result.rows[0];
  await saveHashtags(client, post.id, content);
+ if (poll) await createPoll(client, post.id, poll);
 
  if (replyToId) {
  const repliedToOwner = await client.query('SELECT user_id FROM posts WHERE id = $1', [replyToId]);
