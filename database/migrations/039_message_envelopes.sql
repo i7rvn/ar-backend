@@ -25,3 +25,28 @@ WHERE EXISTS (
   WHERE m.conversation_id = c.id
     AND m.encryption_version >= 1
 );
+
+-- E2E privacy: replace the legacy conversation preview trigger so ciphertext
+-- is never copied into last_msg_text, and keep unread increments centralized
+-- in the trigger instead of application code.
+CREATE OR REPLACE FUNCTION update_conversation_last_msg()
+RETURNS TRIGGER AS $$
+BEGIN
+ UPDATE conversations
+ SET last_msg_at = NEW.created_at,
+     last_msg_text = CASE
+       WHEN COALESCE(NEW.encryption_version, 1) >= 2 THEN '[رسالة مشفّرة]'
+       WHEN NEW.is_deleted THEN '[رسالة محذوفة]'
+       ELSE LEFT(NEW.encrypted_content, 50)
+     END,
+     updated_at = NOW()
+ WHERE id = NEW.conversation_id;
+
+ UPDATE conversation_members
+ SET unread_count = unread_count + 1
+ WHERE conversation_id = NEW.conversation_id
+   AND user_id != NEW.sender_id;
+
+ RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
