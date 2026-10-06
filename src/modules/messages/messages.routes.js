@@ -5,6 +5,7 @@ const { respond, asyncHandler } = require('../../utils/helpers');
 const { query } = require('../../config/database');
 const { z } = require('zod');
 const reactionsService = require('./messageReactions.service');
+const { editMessage } = require('./messageEditing.service');
 
 const router = express.Router();
 
@@ -16,6 +17,11 @@ const sendMessageSchema = z.object({
  mediaUrl: z.string().url().max(500).optional(),
  replyToId: z.string().uuid().optional(),
  expiresIn: z.coerce.number().int().min(0).max(30 * 24 * 60 * 60).optional(),
+}).strict();
+
+const editMessageSchema = z.object({
+ encryptedContent: z.string().min(1).max(700000),
+ nonce: z.string().min(8).max(128),
 }).strict();
 
 const reactionSchema = z.object({
@@ -104,6 +110,13 @@ router.post('/send', asyncHandler(async (req, res) => {
  });
 
  respond.created(res, msg, 'تم إرسال الرسالة');
+}));
+
+router.patch('/:id', asyncHandler(async (req, res) => {
+ const parsed = editMessageSchema.safeParse(req.body);
+ if (!parsed.success) return respond.error(res, 'بيانات تعديل الرسالة غير صالحة', 400, 'INVALID_MESSAGE_EDIT');
+ const message = await editMessage(req.params.id, req.user.id, parsed.data.encryptedContent, parsed.data.nonce);
+ respond.ok(res, message, 'تم تعديل الرسالة');
 }));
 
 // ─── تفاعلات الرسائل ──────────────────────────────────────────
