@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 const { query } = require('../../config/database');
+const { buildVisibilityClause } = require('../posts/postVisibility');
 
 // دالة تبقى موجودة للتوافق مع الاستدعاءات القديمة بـ index.js،
 // لا تفعل شيئاً الآن لأن الفهرسة تتم مباشرة بقاعدة البيانات
@@ -21,7 +22,7 @@ async function indexPost() {
 }
 
 // ─── البحث الرئيسي (PostgreSQL + pg_trgm) ─────────────────────
-async function search(q, type = 'all', page = 1, limit = 20) {
+async function search(q, type = 'all', page = 1, limit = 20, viewerId = null) {
   const offset = (page - 1) * limit;
   const results = { posts: [], users: [], hashtags: [] };
 
@@ -31,9 +32,10 @@ async function search(q, type = 'all', page = 1, limit = 20) {
               similarity(p.content, $1) AS relevance
        FROM posts p JOIN users u ON p.user_id = u.id
        WHERE p.content % $1 AND p.is_deleted = FALSE AND u.is_banned = FALSE
+       ${viewerId ? buildVisibilityClause(4) : "AND p.visibility = 'public'"}
        ORDER BY relevance DESC, p.likes_count DESC
        LIMIT $2 OFFSET $3`,
-      [q, limit, offset]
+      viewerId ? [q, limit, offset, viewerId] : [q, limit, offset]
     );
     results.posts = r.rows;
   }
