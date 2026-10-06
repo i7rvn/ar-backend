@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
+    "dev": "node --watch index.js",
     "seed": "node scripts/seed-owner.js",
     "migrate": "node scripts/run-migrations.js",
     "test": "node --test test/*.test.js",
@@ -36,7 +36,5 @@
     "zod": "^3.23.8",
     "zxcvbn": "^4.4.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.4"
-  }
+  "devDependencies": {}
 }
