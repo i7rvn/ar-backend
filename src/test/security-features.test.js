@@ -53,7 +53,7 @@ test('word filters normalize literally', () => {
 test('E2E public key validation rejects invalid algorithms', () => {
   assert.throws(
     () => validatePublicKeyJwk({ kty: 'EC', alg: 'ECDH-ES' }),
-    (err) => err.code === 'INVALID_E2E_PUBLIC_KEY'
+    (err) => err.code === 'UNSUPPORTED_E2E_ALGORITHM'
   );
   assert.throws(
     () => validatePublicKeyJwk({ kty: 'RSA', alg: 'RSA-OAEP-256', n: 'invalid', e: 'AQAB' }),
