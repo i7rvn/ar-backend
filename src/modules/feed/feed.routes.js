@@ -31,7 +31,7 @@ router.get('/trending', optionalAuthenticate, asyncHandler(async (req, res) => {
 }));
 
 // منشورات مستخدم معين
-router.get('/user/:userId', asyncHandler(async (req, res) => {
+router.get('/user/:userId', optionalAuthenticate, asyncHandler(async (req, res) => {
  const page = parseInt(req.query.page) || 1;
  const limit = parseInt(req.query.limit) || 20;
  const type = ['posts', 'replies', 'likes'].includes(req.query.type) ? req.query.type : 'posts';
