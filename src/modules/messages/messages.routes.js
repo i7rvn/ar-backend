@@ -30,6 +30,11 @@ const sendMessageSchema = z.object({
 const editMessageSchema = z.object({
  encryptedContent: z.string().min(1).max(700000),
  nonce: z.string().min(8).max(128),
+ keyEnvelopes: z.array(z.object({
+  recipientUserId: z.string().uuid(),
+  keyId: z.string().uuid(),
+  encryptedMessageKey: z.string().min(16).max(2048),
+ }).strict()).max(100).optional(),
 }).strict();
 
 const reactionSchema = z.object({
@@ -90,6 +95,11 @@ router.post('/conversations/group', asyncHandler(async (req, res) => {
  respond.created(res, { conversationId: convId }, 'تم إنشاء المجموعة');
 }));
 
+router.get('/conversations/:id/e2e-members', asyncHandler(async (req, res) => {
+ const members = await messagesService.getConversationEncryptionMembers(req.params.id, req.user.id);
+ respond.ok(res, members);
+}));
+
 // ─── رسائل محادثة ────────────────────────────────────────────
 router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
  const page = parseInt(req.query.page) || 1;
@@ -126,7 +136,7 @@ router.post('/send', asyncHandler(async (req, res) => {
 router.patch('/:id', asyncHandler(async (req, res) => {
  const parsed = editMessageSchema.safeParse(req.body);
  if (!parsed.success) return respond.error(res, 'بيانات تعديل الرسالة غير صالحة', 400, 'INVALID_MESSAGE_EDIT');
- const message = await editMessage(req.params.id, req.user.id, parsed.data.encryptedContent, parsed.data.nonce);
+ const message = await editMessage(req.params.id, req.user.id, parsed.data.encryptedContent, parsed.data.nonce, parsed.data.keyEnvelopes);
  respond.ok(res, message, 'تم تعديل الرسالة');
 }));
 

@@ -116,6 +116,29 @@ async function createGroupConversation(creatorId, name, memberIds) {
  });
 }
 
+async function getConversationEncryptionMembers(conversationId, userId) {
+ const access = await query(
+  `SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2`,
+  [conversationId, userId]
+ );
+ if (!access.rows.length) {
+  throw { status: 403, message: 'لست عضواً في هذه المحادثة', code: 'CONVERSATION_FORBIDDEN' };
+ }
+ const result = await query(
+  `SELECT cm.user_id AS "userId",
+          k.id AS "keyId",
+          k.public_key_jwk AS "publicKeyJwk",
+          k.key_version AS "keyVersion"
+   FROM conversation_members cm
+   LEFT JOIN user_e2e_keys k
+     ON k.user_id = cm.user_id AND k.revoked_at IS NULL
+   WHERE cm.conversation_id = $1
+   ORDER BY cm.joined_at ASC`,
+  [conversationId]
+ );
+ return result.rows;
+}
+
 // ─── جلب محادثات المستخدم ────────────────────────────────────
 async function getUserConversations(userId, page = 1, limit = 20) {
  const offset = (page - 1) * limit;
@@ -345,6 +368,7 @@ module.exports = {
  getOrCreateDirectConversation,
  createGroupConversation,
  getUserConversations,
+ getConversationEncryptionMembers,
  getMessages,
  sendMessage,
  markMessagesRead,
