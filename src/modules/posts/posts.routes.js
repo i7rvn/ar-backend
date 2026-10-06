@@ -23,6 +23,8 @@ router.get('/:id/replies', controller.getReplies);
 router.post('/', authenticate, postLimiter, controller.createPost);
 router.delete('/:id', authenticate, controller.deletePost);
 router.post('/:id/like', authenticate, controller.toggleLike);
+router.get('/:id/poll', optionalAuthenticate, controller.getPoll);
+router.post('/:id/poll/vote', authenticate, controller.votePoll);
 router.post('/:id/pin', authenticate, controller.pinPost);
 router.post('/:id/unpin', authenticate, controller.unpinPost);
 
