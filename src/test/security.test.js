@@ -1,27 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { assertProductionSecurityConfig } = require('../config/security');
+const {
+  isOtpVerificationEnabled,
+  getSecurityRuntimeConfig,
+} = require('../config/security');
 
-test('production rejects OTP bypass', () => {
-  assert.throws(
-    () => assertProductionSecurityConfig({
+test('OTP verification is enabled by default', () => {
+  assert.equal(isOtpVerificationEnabled({}), true);
+});
+
+test('OTP verification can be skipped explicitly', () => {
+  assert.equal(isOtpVerificationEnabled({ SKIP_OTP_VERIFICATION: 'true' }), false);
+});
+
+test('OTP bypass works in production only when explicitly configured', () => {
+  assert.equal(
+    getSecurityRuntimeConfig({
       NODE_ENV: 'production',
       SKIP_OTP_VERIFICATION: 'true',
-    }),
-    /SKIP_OTP_VERIFICATION=true is forbidden in production/
+    }).otpVerificationEnabled,
+    false
   );
 });
 
-test('development may use OTP bypass for local debugging', () => {
-  assert.doesNotThrow(() => assertProductionSecurityConfig({
-    NODE_ENV: 'development',
-    SKIP_OTP_VERIFICATION: 'true',
-  }));
-});
-
-test('production without bypass is allowed', () => {
-  assert.doesNotThrow(() => assertProductionSecurityConfig({
-    NODE_ENV: 'production',
-    SKIP_OTP_VERIFICATION: 'false',
-  }));
+test('production keeps OTP verification enabled when bypass is not configured', () => {
+  assert.equal(
+    getSecurityRuntimeConfig({
+      NODE_ENV: 'production',
+      SKIP_OTP_VERIFICATION: 'false',
+    }).otpVerificationEnabled,
+    true
+  );
 });
