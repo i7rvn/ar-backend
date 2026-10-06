@@ -110,7 +110,10 @@ async function runFile(file, sql) {
     }
   }
 
-  console.log(hadRealError ? `انتهى ${file} مع أخطاء حقيقية (راجع أعلاه)` : `تم بنجاح (جملة بجملة): ${file}`);
+  if (hadRealError) {
+    throw new Error(`فشل migration بسبب أخطاء SQL حقيقية: ${file}`);
+  }
+  console.log(`تم بنجاح (جملة بجملة): ${file}`);
 }
 
 async function runMigrations() {
