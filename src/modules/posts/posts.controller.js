@@ -3,11 +3,11 @@ const { respond, asyncHandler } = require('../../utils/helpers');
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
 const createPost = asyncHandler(async (req, res) => {
- const { content, mediaUrls, mediaTypes, replyToId, repostOfId, quoteOfId, communityId } = req.body;
+ const { content, mediaUrls, mediaTypes, replyToId, repostOfId, quoteOfId, communityId, isSensitive, sensitiveWarning } = req.body;
  const post = await postsService.createPost({
  userId: req.user.id,
  content, mediaUrls, mediaTypes,
- replyToId, repostOfId, quoteOfId, communityId,
+ replyToId, repostOfId, quoteOfId, communityId, isSensitive, sensitiveWarning,
  });
  respond.created(res, post, 'تم نشر تغريدتك');
 });
