@@ -252,10 +252,6 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
  const expiresAt = expiresIn
   ? new Date(Date.now() + expiresIn * 1000)
   : null;
- const previewText = Number(encryptionVersion) === 2
-  ? '[رسالة مشفّرة]'
-  : (msgType === 'text' ? encryptedContent.slice(0, 100) : '[' + msgType + ']');
-
  const message = await withTransaction(async (client) => {
   const inserted = await client.query(
    `INSERT INTO messages
@@ -271,11 +267,6 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
    [created.id, senderId]
   );
 
-  await client.query(
-   `UPDATE conversations SET last_msg_at = NOW(), last_msg_text = $1 WHERE id = $2`,
-   [previewText, conversationId]
-  );
-
   if (Number(encryptionVersion) === 2) {
    for (const envelope of keyEnvelopes) {
     await client.query(
@@ -285,12 +276,6 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
     );
    }
   }
-
-  await client.query(
-   `UPDATE conversation_members SET unread_count = unread_count + 1
-    WHERE conversation_id = $1 AND user_id != $2`,
-   [conversationId, senderId]
-  );
 
   return created;
  });
