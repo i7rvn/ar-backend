@@ -2,6 +2,7 @@ const { query } = require('../config/database');
 const logger = require('./logger');
 const { resetDailySpamScores } = require('../modules/ai-filter/spam');
 const { rotateExpiredKeys } = require('../modules/ai-filter/encryption.service');
+const { cleanupExpiredStories } = require('../modules/stories/stories.service');
 
 async function cleanupExpiredOTPs() {
  try {
@@ -44,6 +45,13 @@ async function cleanupOldSecurityLogs() {
  } catch (err) { logger.error('خطأ:', err); }
 }
 
+async function cleanupExpiredStoriesJob() {
+ try {
+  const removed = await cleanupExpiredStories();
+  if (removed > 0) logger.info(`حذف ${removed} قصة منتهية`);
+ } catch (err) { logger.error('خطأ:', err); }
+}
+
 // ─── جديد المرحلة 4 ───────────────────────────────────────────
 async function cleanupOldContentChecks() {
  try {
@@ -58,6 +66,7 @@ async function cleanupOldContentChecks() {
 function startCronJobs() {
  // كل 5 دقائق
  setInterval(cleanupExpiredMessages, 5 * 60 * 1000);
+ setInterval(cleanupExpiredStoriesJob, 5 * 60 * 1000);
 
  // كل 30 دقيقة
  setInterval(cleanupExpiredOTPs, 30 * 60 * 1000);
@@ -80,6 +89,7 @@ function startCronJobs() {
  cleanupExpiredOTPs();
  cleanupExpiredSessions();
  cleanupExpiredMessages();
+ cleanupExpiredStoriesJob();
  resetDailySpamScores();
 
  logger.info('المهام التلقائية تعمل');
