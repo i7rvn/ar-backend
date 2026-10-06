@@ -6,6 +6,7 @@ const { query } = require('../../config/database');
 const { z } = require('zod');
 const reactionsService = require('./messageReactions.service');
 const { editMessage } = require('./messageEditing.service');
+const { pinMessage, unpinMessage, listPinnedMessages } = require('./messagePinning.service');
 
 const router = express.Router();
 
@@ -117,6 +118,21 @@ router.patch('/:id', asyncHandler(async (req, res) => {
  if (!parsed.success) return respond.error(res, 'بيانات تعديل الرسالة غير صالحة', 400, 'INVALID_MESSAGE_EDIT');
  const message = await editMessage(req.params.id, req.user.id, parsed.data.encryptedContent, parsed.data.nonce);
  respond.ok(res, message, 'تم تعديل الرسالة');
+}));
+
+router.get('/conversations/:id/pinned', asyncHandler(async (req, res) => {
+ const messages = await listPinnedMessages(req.params.id, req.user.id);
+ respond.ok(res, messages);
+}));
+
+router.post('/:id/pin', asyncHandler(async (req, res) => {
+ const message = await pinMessage(req.params.id, req.user.id);
+ respond.ok(res, message, 'تم تثبيت الرسالة');
+}));
+
+router.delete('/:id/pin', asyncHandler(async (req, res) => {
+ const message = await unpinMessage(req.params.id, req.user.id);
+ respond.ok(res, message, 'تم إلغاء تثبيت الرسالة');
 }));
 
 // ─── تفاعلات الرسائل ──────────────────────────────────────────
