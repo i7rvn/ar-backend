@@ -148,4 +148,4 @@ async function handleUpload(file, userId) {
 // ─── Middleware للرفع ──────────────────────────────────────────
 const uploadMiddleware = upload.array('media', 4);
 
-module.exports = { upload, uploadMiddleware, handleUpload };
+module.exports = { upload, uploadMiddleware, handleUpload, detectAllowedFileMime, verifyRealFileType };
