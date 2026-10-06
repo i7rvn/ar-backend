@@ -76,5 +76,8 @@ jobs:
           name: backend-build-diagnostics
           path: build-output.txt
 
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
       - name: Unit and schema tests
         run: npm test
