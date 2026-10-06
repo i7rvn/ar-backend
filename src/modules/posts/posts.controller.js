@@ -1,6 +1,7 @@
 const postsService = require('./posts.service');
 const { respond, asyncHandler } = require('../../utils/helpers');
 const { getPollForPost, voteOnPoll } = require('../polls/polls.service');
+const { getPostThread } = require('./thread.service');
 
 const createPost = asyncHandler(async (req, res) => {
  const {
@@ -59,6 +60,11 @@ const getReplies = asyncHandler(async (req, res) => {
  respond.ok(res, replies);
 });
 
+const getThread = asyncHandler(async (req, res) => {
+ const thread = await getPostThread(req.params.id, req.user?.id, req.query.limit);
+ respond.ok(res, thread);
+});
+
 const pinPost = asyncHandler(async (req, res) => {
  await postsService.pinPost(req.params.id, req.user.id);
  respond.ok(res, {}, 'تم تثبيت المنشور');
@@ -86,6 +92,7 @@ module.exports = {
  deletePost,
  toggleLike,
  getReplies,
+ getThread,
  pinPost,
  unpinPost,
  votePoll,
