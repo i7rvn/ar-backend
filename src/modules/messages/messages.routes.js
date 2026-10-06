@@ -18,6 +18,13 @@ const sendMessageSchema = z.object({
  mediaUrl: z.string().url().max(500).optional(),
  replyToId: z.string().uuid().optional(),
  expiresIn: z.coerce.number().int().min(0).max(30 * 24 * 60 * 60).optional(),
+ encryptionVersion: z.coerce.number().int().min(1).max(2).default(2),
+ encryptionAlgorithm: z.string().max(40).default('RSA-OAEP-256'),
+ keyEnvelopes: z.array(z.object({
+  recipientUserId: z.string().uuid(),
+  keyId: z.string().uuid(),
+  encryptedMessageKey: z.string().min(16).max(2048),
+ }).strict()).max(100).default([]),
 }).strict();
 
 const editMessageSchema = z.object({
@@ -97,7 +104,7 @@ router.post('/send', asyncHandler(async (req, res) => {
  if (!parsed.success) {
   return respond.error(res, 'بيانات الرسالة غير صالحة', 400, 'INVALID_MESSAGE_PAYLOAD');
  }
- const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn } = parsed.data;
+ const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn, encryptionVersion, encryptionAlgorithm, keyEnvelopes } = parsed.data;
 
  const msg = await messagesService.sendMessage({
   conversationId,
@@ -108,6 +115,9 @@ router.post('/send', asyncHandler(async (req, res) => {
   mediaUrl,
   replyToId,
   expiresIn,
+  encryptionVersion,
+  encryptionAlgorithm,
+  keyEnvelopes,
  });
 
  respond.created(res, msg, 'تم إرسال الرسالة');
