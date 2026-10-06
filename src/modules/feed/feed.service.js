@@ -4,6 +4,7 @@
 
 const { query } = require('../../config/database');
 const { getCache, setCache } = require('../../config/redis');
+const { buildVisibilityClause } = require('../posts/postVisibility');
 
 // ─── الفيد الرئيسي (لأجلك) ────────────────────────────────────
 async function getForYouFeed(userId, page = 1, limit = 20) {
@@ -40,6 +41,7 @@ async function getForYouFeed(userId, page = 1, limit = 20) {
  AND p.repost_of_id IS NULL -- لا ريتويت في الفيد
  AND p.created_at > NOW() - INTERVAL '7 days'
  AND u.is_banned = FALSE
+ AND (p.user_id = $1 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $1))))
  AND NOT EXISTS ( -- استثناء ثنائي الاتجاه: أنا حاظره أو هو حاظرني
    SELECT 1 FROM user_blocks b
    WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
@@ -85,6 +87,7 @@ async function getFollowingFeed(userId, page = 1, limit = 20) {
    WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
       OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
  )
+ AND (p.user_id = $1 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $1))))
  AND NOT EXISTS (
    SELECT 1 FROM user_mutes m WHERE m.muter_id = $1 AND m.muted_id = p.user_id
  )
@@ -129,6 +132,7 @@ async function getTrendingFeed(page = 1, limit = 20, viewerId = null) {
  AND p.reply_to_id IS NULL
  AND p.created_at > NOW() - INTERVAL '48 hours'
  AND u.is_banned = FALSE
+ ${viewerId ? "AND (p.user_id = $3 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $3))))" : "AND p.visibility = 'public'"}
  ${blockCondition}
  ORDER BY score DESC, p.created_at DESC
  LIMIT $1 OFFSET $2`,
@@ -178,6 +182,7 @@ async function getUserPosts(targetUserId, viewerId = null, page = 1, limit = 20,
      FROM posts p
      JOIN users u ON p.user_id = u.id
      ${whereAndJoin}
+     ${viewerId ? "AND (p.user_id = $3 OR p.visibility = 'public' OR p.visibility = 'unlisted' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $3))))" : "AND p.visibility = 'public'"}
      ORDER BY ${orderBy}
      LIMIT $2 OFFSET ${offset}`,
     params
