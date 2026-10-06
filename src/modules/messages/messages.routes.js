@@ -3,8 +3,26 @@ const messagesService = require('./messages.service');
 const { authenticate } = require('../../middleware/auth');
 const { respond, asyncHandler } = require('../../utils/helpers');
 const { query } = require('../../config/database');
+const { z } = require('zod');
+const reactionsService = require('./messageReactions.service');
 
 const router = express.Router();
+
+const sendMessageSchema = z.object({
+ conversationId: z.string().uuid(),
+ encryptedContent: z.string().min(1).max(700000),
+ nonce: z.string().min(8).max(128),
+ msgType: z.enum(['text', 'image', 'video', 'audio', 'file']).optional(),
+ mediaUrl: z.string().url().max(500).optional(),
+ replyToId: z.string().uuid().optional(),
+ expiresIn: z.coerce.number().int().min(0).max(30 * 24 * 60 * 60).optional(),
+}).strict();
+
+const reactionSchema = z.object({
+ reaction: z.enum(['👍', '❤️', '😂', '😢', '😡', '😮', '👎']),
+}).strict();
+
+
 
 // كل مسارات الرسائل محمية
 router.use(authenticate);
@@ -68,24 +86,42 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
 
 // ─── إرسال رسالة ─────────────────────────────────────────────
 router.post('/send', asyncHandler(async (req, res) => {
- const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn } = req.body;
-
- if (!conversationId || !encryptedContent || !nonce) {
- return respond.error(res, 'conversationId و encryptedContent و nonce مطلوبة', 400);
+ const parsed = sendMessageSchema.safeParse(req.body);
+ if (!parsed.success) {
+  return respond.error(res, 'بيانات الرسالة غير صالحة', 400, 'INVALID_MESSAGE_PAYLOAD');
  }
+ const { conversationId, encryptedContent, nonce, msgType, mediaUrl, replyToId, expiresIn } = parsed.data;
 
  const msg = await messagesService.sendMessage({
- conversationId,
- senderId: req.user.id,
- encryptedContent,
- nonce,
- msgType,
- mediaUrl,
- replyToId,
- expiresIn,
+  conversationId,
+  senderId: req.user.id,
+  encryptedContent,
+  nonce,
+  msgType,
+  mediaUrl,
+  replyToId,
+  expiresIn,
  });
 
  respond.created(res, msg, 'تم إرسال الرسالة');
+}));
+
+// ─── تفاعلات الرسائل ──────────────────────────────────────────
+router.get('/:id/reactions', asyncHandler(async (req, res) => {
+ const reactions = await reactionsService.getMessageReactions(req.params.id, req.user.id);
+ respond.ok(res, reactions);
+}));
+
+router.post('/:id/reaction', asyncHandler(async (req, res) => {
+ const parsed = reactionSchema.safeParse(req.body);
+ if (!parsed.success) return respond.error(res, 'التفاعل غير صالح', 400, 'INVALID_MESSAGE_REACTION');
+ const reactions = await reactionsService.addMessageReaction(req.params.id, req.user.id, parsed.data.reaction);
+ respond.ok(res, reactions, 'تمت إضافة التفاعل');
+}));
+
+router.delete('/:id/reaction/:reaction', asyncHandler(async (req, res) => {
+ const reactions = await reactionsService.removeMessageReaction(req.params.id, req.user.id, req.params.reaction);
+ respond.ok(res, reactions, 'تم حذف التفاعل');
 }));
 
 // ─── حذف رسالة ───────────────────────────────────────────────
