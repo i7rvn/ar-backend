@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: Sync lockfile for dependency migration
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        working-directory: .
+        working-directory: ../
         run: |
           cd src
           npm install --package-lock-only --ignore-scripts
