@@ -1,6 +1,5 @@
 const WebSocket = require('ws');
 const { WebSocketServer } = WebSocket;
-const url = require('url');
 const { z } = require('zod');
 const { client: redisClient } = require('../../config/redis');
 const logger = require('../../config/logger');
@@ -282,7 +281,9 @@ function attachWebSocketServer(httpServer) {
   });
 
   httpServer.on('upgrade', (request, socket, head) => {
-    const { pathname, query } = url.parse(request.url, true);
+    const requestUrl = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+    const pathname = requestUrl.pathname;
+    const query = Object.fromEntries(requestUrl.searchParams.entries());
     if (pathname !== '/ws') {
       socket.destroy();
       return;
