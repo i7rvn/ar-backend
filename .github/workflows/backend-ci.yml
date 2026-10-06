@@ -8,9 +8,45 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ar_test
+          POSTGRES_USER: ar_test
+          POSTGRES_PASSWORD: ar_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ar_test -d ar_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
     defaults:
       run:
         working-directory: src
+    env:
+      NODE_ENV: test
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: ar_test
+      DB_USER: ar_test
+      DB_PASSWORD: ar_test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      SKIP_OTP_VERIFICATION: "false"
+      ALLOW_LEGACY_MESSAGE_ENCRYPTION: "false"
+      JWT_SECRET: test-jwt-secret-only-for-ci
+      JWT_REFRESH_SECRET: test-jwt-refresh-secret-only-for-ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,14 +61,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax check changed backend files
-        run: |
-          node --check config/security.js
-          node --check middleware/auth.js
-          node --check modules/messages/messages.service.js
-          node --check modules/websocket/server.js
-          node --check modules/auth/auth.service.js
-          node --check index.js
+      - name: Database migrations
+        run: npm run migrate
+
+      - name: Build syntax gate
+        run: npm run build
 
       - name: Unit and schema tests
         run: npm test
