@@ -5,7 +5,7 @@ CREATE TABLE message_reactions (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   reaction VARCHAR(16) NOT NULL CHECK (reaction IN ('👍','❤️','😂','😢','😡','😮','👎')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (message_id, user_id, reaction)
+  UNIQUE (message_id, user_id)
 );
 
 CREATE INDEX idx_message_reactions_message ON message_reactions(message_id);
