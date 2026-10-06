@@ -5,6 +5,7 @@
 const { query, withTransaction } = require('../../config/database');
 const { deleteCache } = require('../../config/redis');
 const logger = require('../../config/logger');
+const { normalizeContentWarning } = require('../../utils/postPayload');
 
 // ─── استخراج الهاشتاقات من النص ──────────────────────────────
 function extractHashtags(text) {
@@ -33,18 +34,8 @@ async function saveHashtags(client, postId, content) {
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
 async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null }) {
-  if (typeof isSensitive !== 'boolean') {
-    throw { status: 400, message: 'isSensitive لازم يكون true أو false', code: 'INVALID_SENSITIVE_FLAG' };
-  }
-  if (sensitiveWarning !== null && sensitiveWarning !== undefined && typeof sensitiveWarning !== 'string') {
-    throw { status: 400, message: 'نص التحذير غير صالح', code: 'INVALID_SENSITIVE_WARNING' };
-  }
-  const normalizedSensitiveWarning = isSensitive
-    ? ((sensitiveWarning || '').trim() || 'قد يحتوي هذا المنشور على محتوى حساس.')
-    : null;
-  if (normalizedSensitiveWarning && normalizedSensitiveWarning.length > 200) {
-    throw { status: 400, message: 'نص تحذير المحتوى لا يتجاوز 200 حرف', code: 'SENSITIVE_WARNING_TOO_LONG' };
-  }
+  const { isSensitive: normalizedSensitive, sensitiveWarning: normalizedSensitiveWarning } =
+    normalizeContentWarning(isSensitive, sensitiveWarning);
  return await withTransaction(async (client) => {
  if (communityId) {
  const membership = await client.query(
@@ -95,7 +86,7 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
  `INSERT INTO posts (user_id, content, media_urls, media_types, reply_to_id, quote_of_id, community_id, is_sensitive, sensitive_warning)
  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
  RETURNING *`,
- [userId, content, mediaUrls, mediaTypes, replyToId || null, quoteOfId || null, communityId || null, isSensitive, normalizedSensitiveWarning]
+ [userId, content, mediaUrls, mediaTypes, replyToId || null, quoteOfId || null, communityId || null, normalizedSensitive, normalizedSensitiveWarning]
  );
 
  const post = result.rows[0];
