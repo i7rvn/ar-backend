@@ -52,23 +52,29 @@ const upload = multer({
 // كان يترفع مباشرة لـ R2 بلا أي تحقق فعلي من محتواه الحقيقي، وهذا
 // يسمح برفع أي ملف (حتى تنفيذي أو HTML) بادّعاء أنه video/mp4،
 // ويُخدَم لاحقاً للعموم عبر CDN بعنوان يبدو موثوقاً.
-async function verifyRealFileType(buffer, claimedMimetype) {
- const { fileTypeFromBuffer } = require('file-type');
- const detected = await fileTypeFromBuffer(buffer);
+function detectAllowedFileMime(buffer) {
+ if (!Buffer.isBuffer(buffer)) return null;
+ if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+ if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return 'image/png';
+ if (buffer.length >= 6 && (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a')) return 'image/gif';
+ if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+ if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'video/mp4';
+ return null;
+}
 
- if (!detected) {
- throw { status: 400, message: 'تعذّر التحقق من نوع الملف الحقيقي', code: 'UNKNOWN_FILE_TYPE' };
+function verifyRealFileType(buffer, claimedMimetype) {
+ const detectedMime = detectAllowedFileMime(buffer);
+ if (!detectedMime) {
+  throw { status: 400, message: 'تعذّر التحقق من نوع الملف الحقيقي', code: 'UNKNOWN_FILE_TYPE' };
  }
-
- if (detected.mime !== claimedMimetype) {
- throw {
- status: 400,
- message: `محتوى الملف لا يطابق نوعه المُعلَن (مُعلَن: ${claimedMimetype}, حقيقي: ${detected.mime})`,
- code: 'FILE_TYPE_MISMATCH',
- };
+ if (detectedMime !== claimedMimetype) {
+  throw {
+   status: 400,
+   message: `محتوى الملف لا يطابق نوعه المُعلَن (مُعلَن: ${claimedMimetype}, حقيقي: ${detectedMime})`,
+   code: 'FILE_TYPE_MISMATCH',
+  };
  }
-
- return detected;
+ return { mime: detectedMime };
 }
 
 // ─── ضغط وتحسين الصور ─────────────────────────────────────────
@@ -142,4 +148,4 @@ async function handleUpload(file, userId) {
 // ─── Middleware للرفع ──────────────────────────────────────────
 const uploadMiddleware = upload.array('media', 4);
 
-module.exports = { upload, uploadMiddleware, handleUpload };
+module.exports = { upload, uploadMiddleware, handleUpload, detectAllowedFileMime, verifyRealFileType };
