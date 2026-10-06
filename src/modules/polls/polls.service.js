@@ -53,8 +53,9 @@ async function createPoll(client, postId, pollInput) {
   return inserted.rows[0];
 }
 
-async function getPollForPost(postId, viewerId = null) {
-  const pollResult = await query(
+async function getPollForPost(postId, viewerId = null, executor = null) {
+  const db = executor || { query };
+  const pollResult = await db.query(
     `SELECT id, post_id, expires_at, created_at
      FROM polls
      WHERE post_id = $1`,
@@ -63,7 +64,7 @@ async function getPollForPost(postId, viewerId = null) {
   if (!pollResult.rows.length) return null;
 
   const poll = pollResult.rows[0];
-  const options = await query(
+  const options = await db.query(
     `SELECT
        po.id,
        po.option_text,
@@ -79,7 +80,7 @@ async function getPollForPost(postId, viewerId = null) {
 
   let myVote = null;
   if (viewerId) {
-    const vote = await query(
+    const vote = await db.query(
       `SELECT option_id FROM poll_votes WHERE poll_id = $1 AND user_id = $2`,
       [poll.id, viewerId]
     );
@@ -140,7 +141,7 @@ async function voteOnPoll(postId, userId, optionId) {
       throw err;
     }
 
-    return getPollForPost(postId, userId);
+    return getPollForPost(postId, userId, client);
   });
 }
 
