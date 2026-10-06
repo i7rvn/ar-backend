@@ -64,7 +64,6 @@ const wordFiltersRoutes = require('./modules/filters/wordFilters.routes');
 const linkPreviewRoutes = require('./modules/link-preview/linkPreview.routes');
 const e2eKeysRoutes = require('./modules/messages/e2eKeys.routes');
 const storiesRoutes = require('./modules/stories/stories.routes');
-ic=ic;
 
 // ─── Routes جديدة لدعم Admin Dashboard الكامل ───────────────────
 const dashboardUsersRoutes = require('./modules/admin/dashboardUsers.routes');
