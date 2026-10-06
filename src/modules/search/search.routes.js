@@ -1,10 +1,11 @@
 const express = require('express');
 const searchService = require('./search.service');
 const { respond, asyncHandler } = require('../../utils/helpers');
+const { optionalAuthenticate } = require('../../middleware/optionalAuth');
 
 const router = express.Router();
 
-router.get('/', asyncHandler(async (req, res) => {
+router.get('/', optionalAuthenticate, asyncHandler(async (req, res) => {
  const { q, type = 'all', page = 1, limit = 20 } = req.query;
 
  if (!q || q.trim().length < 2) {
@@ -14,7 +15,7 @@ router.get('/', asyncHandler(async (req, res) => {
  const results = await searchService.search(
  q.trim(), type,
  parseInt(page),
- parseInt(limit)
+ parseInt(limit), req.user?.id || null
  );
 
  respond.ok(res, results);
