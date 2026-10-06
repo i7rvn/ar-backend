@@ -2,6 +2,7 @@ const authService = require('./auth.service');
 const logger = require('../../config/logger');
 const { getClientIP } = require('../../middleware/vpn');
 const { recordFailedAttempt, clearFailedAttempts } = require('../../middleware/accountLock');
+const { setRefreshCookie, clearRefreshCookie, readCookie, isAllowedBrowserOrigin } = require('../../utils/refreshCookie');
 
 // ─── إرسال OTP ────────────────────────────────────────────────
 async function sendOTP(req, res) {
@@ -45,11 +46,8 @@ async function verifyOTP(req, res) {
 async function register(req, res) {
   try {
     const { user, accessToken, refreshToken } = await authService.register(req.body, req);
-    res.status(201).json({
-      success: true,
-      message: 'تم إنشاء حسابك بنجاح، مرحباً بك في AR',
-      data: { user, accessToken, refreshToken },
-    });
+    setRefreshCookie(res, refreshToken);
+    res.status(201).json({ success: true, message: 'تم إنشاء حسابك بنجاح، مرحباً بك في AR', data: { user, accessToken } });
   } catch (err) {
     res.status(err.status || 500).json({
       success: false,
@@ -65,11 +63,8 @@ async function login(req, res) {
     const ip = getClientIP(req);
     const { user, accessToken, refreshToken } = await authService.login(req.body, ip, req);
     if (req.lockKey) await clearFailedAttempts(req.lockKey);
-    res.json({
-      success: true,
-      message: `مرحباً بعودتك يا ${user.display_name}`,
-      data: { user, accessToken, refreshToken },
-    });
+    setRefreshCookie(res, refreshToken);
+    res.json({ success: true, message: `مرحباً بعودتك يا ${user.display_name}`, data: { user, accessToken } });
   } catch (err) {
     if (err.code === 'TOTP_REQUIRED') {
       return res.status(428).json({ success: false, requiresTOTP: true, code: 'TOTP_REQUIRED', message: err.message });
@@ -88,8 +83,9 @@ async function login(req, res) {
 // ─── تسجيل الخروج ─────────────────────────────────────────────
 async function logout(req, res) {
  try {
- // refreshToken اختياري بالـ body — لو انبعث يتبلاكليست هو الآخر
- await authService.logout(req.token, req.user.id, req.body?.refreshToken || null);
+ const refreshToken = readCookie(req.headers.cookie);
+ await authService.logout(req.token, req.user.id, refreshToken);
+ clearRefreshCookie(res);
  res.json({ success: true, message: 'تم تسجيل الخروج بنجاح' });
  } catch (err) {
  res.status(500).json({ success: false, message: err.message });
@@ -99,16 +95,18 @@ async function logout(req, res) {
 // ─── تجديد الـ Token ───────────────────────────────────────────
 async function refreshToken(req, res) {
  try {
- const { refreshToken } = req.body;
- if (!refreshToken) {
- return res.status(400).json({ success: false, message: 'رمز التجديد مطلوب' });
- }
- // الآن ترجّع accessToken جديد + refreshToken جديد أيضاً (rotation) —
- // القديم يتبطّل تلقائياً داخل authService.refreshAccessToken
- const { accessToken, refreshToken: newRefreshToken } = await authService.refreshAccessToken(refreshToken);
- res.json({ success: true, data: { accessToken, refreshToken: newRefreshToken } });
+   const origin = req.get('Origin');
+   if (req.get('Content-Type') !== 'application/json' || !isAllowedBrowserOrigin(origin)) {
+     return res.status(403).json({ success: false, message: 'طلب التجديد غير مسموح', code: 'REFRESH_CSRF_BLOCKED' });
+   }
+   const token = readCookie(req.headers.cookie);
+   if (!token) return res.status(401).json({ success: false, message: 'انتهت الجلسة', code: 'NO_REFRESH_TOKEN' });
+   const { accessToken, refreshToken: newRefreshToken } = await authService.refreshAccessToken(token);
+   setRefreshCookie(res, newRefreshToken);
+   res.json({ success: true, data: { accessToken } });
  } catch (err) {
- res.status(err.status || 500).json({ success: false, message: err.message });
+   clearRefreshCookie(res);
+   res.status(err.status || 500).json({ success: false, message: err.message, code: err.code });
  }
 }
 
