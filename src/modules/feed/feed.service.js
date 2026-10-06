@@ -186,7 +186,6 @@ async function getUserPosts(targetUserId, viewerId = null, page = 1, limit = 20,
      JOIN users u ON p.user_id = u.id
      ${whereAndJoin}
      ${viewerId ? "AND (p.user_id = $3 OR p.visibility = 'public' OR p.visibility = 'unlisted' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $3))))" : "AND p.visibility = 'public'"}
-     ${viewerId ? `AND NOT EXISTS (SELECT 1 FROM user_word_filters wf WHERE wf.user_id = $3 AND (wf.expires_at IS NULL OR wf.expires_at > NOW()) AND p.content ILIKE '%' || wf.phrase || '%')` : ''}
      ORDER BY ${orderBy}
      LIMIT $2 OFFSET ${offset}`,
     params
