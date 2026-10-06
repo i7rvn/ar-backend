@@ -60,6 +60,7 @@ const encryptionSectionsRoutes = require('./modules/admin/encryption.routes');
 const notificationPreferencesRoutes = require('./modules/notifications/preferences.routes');
 const communitiesRoutes = require('./modules/communities/communities.routes');
 const statsRoutes = require('./modules/stats/stats.routes');
+const wordFiltersRoutes = require('./modules/filters/wordFilters.routes');
 
 // ─── Routes جديدة لدعم Admin Dashboard الكامل ───────────────────
 const dashboardUsersRoutes = require('./modules/admin/dashboardUsers.routes');
@@ -182,6 +183,7 @@ app.use('/api/account', accountRoutes);
 app.use('/api/notifications/preferences', notificationPreferencesRoutes);
 app.use('/api/communities', communitiesRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/word-filters', wordFiltersRoutes);
 
 // ─── 404 + معالج الأخطاء ────────────────────────────────────────
 app.use((req, res) =>
