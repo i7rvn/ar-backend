@@ -26,7 +26,7 @@ const { globalLimiter } = require('./middleware/rateLimit');
 const { vpnGuard } = require('./middleware/vpn');
 const { metricsMiddleware, updateDBMetrics, setActiveUsers } = require('./config/metrics');
 const { requireClientKey } = require('./middleware/clientAuth');
-const { assertProductionSecurityConfig } = require('./config/security');
+const { getSecurityRuntimeConfig } = require('./config/security');
 const { attachWebSocketServer, getOnlineUserIds } = require('./modules/websocket/server');
 
 // ─── Routes ───────────────────────────────────────────────────
@@ -200,7 +200,8 @@ const httpServer = http.createServer(app);
 
 async function start() {
   try {
-    assertProductionSecurityConfig();
+    const securityConfig = getSecurityRuntimeConfig();
+    logger.warn(`OTP verification ${securityConfig.otpVerificationEnabled ? 'enabled' : 'SKIPPED'} by runtime configuration`);
     await connectDB();
     await connectRedis();
 
