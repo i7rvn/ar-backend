@@ -4,7 +4,7 @@ const { getPollForPost, voteOnPoll } = require('../polls/polls.service');
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
 const createPost = asyncHandler(async (req, res) => {
- const { content, mediaUrls, mediaTypes, replyToId, repostOfId, quoteOfId, communityId, isSensitive, sensitiveWarning, poll, poll } = req.body;
+ const { content, mediaUrls, mediaTypes, replyToId, repostOfId, quoteOfId, communityId, isSensitive, sensitiveWarning, poll, visibility, poll } = req.body;
  const post = await postsService.createPost({
  userId: req.user.id,
  content, mediaUrls, mediaTypes,
