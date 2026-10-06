@@ -6,6 +6,7 @@ const { client: redisClient } = require('../../config/redis');
 const logger = require('../../config/logger');
 const { authenticateAccessToken } = require('../../middleware/auth');
 const messagesService = require('../messages/messages.service');
+const { consumeWebSocketTicket } = require('../../utils/websocketTicket');
 
 const userConnections = new Map();
 const roomConnections = new Map();
@@ -287,26 +288,36 @@ function attachWebSocketServer(httpServer) {
       return;
     }
 
-    const token = Array.isArray(query.token) ? query.token[0] : query.token;
-    if (typeof token !== 'string' || !token) {
+    const ticket = Array.isArray(query.ticket) ? query.ticket[0] : query.ticket;
+    if (typeof ticket !== 'string' || !ticket) {
       rejectUpgrade(socket, 401);
       return;
     }
 
     (async () => {
+      const ticketSession = await consumeWebSocketTicket(ticket);
+      if (!ticketSession?.accessToken) {
+        rejectUpgrade(socket, 401);
+        return;
+      }
+
       let session;
       try {
-        session = await authenticateAccessToken(token);
+        session = await authenticateAccessToken(ticketSession.accessToken);
       } catch (err) {
         const status = err?.status === 403 ? 403 : 401;
         rejectUpgrade(socket, status);
+        return;
+      }
+      if (session.user.id !== ticketSession.userId || (session.deviceId || null) !== (ticketSession.deviceId || null)) {
+        rejectUpgrade(socket, 401);
         return;
       }
 
       wss.handleUpgrade(request, socket, head, (ws) => {
         ws.userId = session.user.id;
         ws.user = session.user;
-        ws.token = token;
+        ws.token = ticketSession.accessToken;
         ws.deviceId = session.deviceId;
         ws.rooms = new Set();
         ws.rateWindow = { eventsStartedAt: Date.now(), events: 0, joinsStartedAt: Date.now(), joins: 0 };

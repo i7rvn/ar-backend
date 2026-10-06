@@ -3,6 +3,7 @@ const logger = require('../../config/logger');
 const { getClientIP } = require('../../middleware/vpn');
 const { recordFailedAttempt, clearFailedAttempts } = require('../../middleware/accountLock');
 const { setRefreshCookie, clearRefreshCookie, readCookie, isAllowedBrowserOrigin } = require('../../utils/refreshCookie');
+const { createWebSocketTicket } = require('../../utils/websocketTicket');
 
 // ─── إرسال OTP ────────────────────────────────────────────────
 async function sendOTP(req, res) {
@@ -80,6 +81,20 @@ async function login(req, res) {
   }
 }
 
+
+// ─── WebSocket one-time ticket ────────────────────────────────
+async function createWebSocketTicketController(req, res) {
+  try {
+    const ticket = await createWebSocketTicket({
+      userId: req.user.id,
+      deviceId: req.deviceId || null,
+      accessToken: req.token,
+    });
+    res.json({ success: true, data: { ticket, expiresIn: 30 } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'تعذر إنشاء جلسة WebSocket' });
+  }
+}
 // ─── تسجيل الخروج ─────────────────────────────────────────────
 async function logout(req, res) {
  try {
@@ -195,4 +210,4 @@ async function checkPasswordStrength(req, res) {
  }
 }
 
-module.exports = { sendOTP, verifyOTP, register, login, logout, refreshToken, me, forgotPassword, resetPassword, checkPasswordStrength, exchangeImpersonationCode };
+module.exports = { sendOTP, verifyOTP, register, login, logout, refreshToken, me, forgotPassword, resetPassword, checkPasswordStrength, exchangeImpersonationCode, createWebSocketTicketController };
