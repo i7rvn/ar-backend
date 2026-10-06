@@ -7,6 +7,7 @@ const { deleteCache } = require('../../config/redis');
 const logger = require('../../config/logger');
 const { normalizeContentWarning } = require('../../utils/postPayload');
 const { createPoll } = require('../polls/polls.service');
+const { normalizeVisibility, buildVisibilityClause } = require('./postVisibility');
 
 // ─── استخراج الهاشتاقات من النص ──────────────────────────────
 function extractHashtags(text) {
@@ -34,7 +35,8 @@ async function saveHashtags(client, postId, content) {
 }
 
 // ─── إنشاء منشور ──────────────────────────────────────────────
-async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null, poll = null }) {
+async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], replyToId, repostOfId, quoteOfId, communityId, isSensitive = false, sensitiveWarning = null, poll = null, visibility = 'public' }) {
+  const normalizedVisibility = normalizeVisibility(visibility);
   const { isSensitive: normalizedSensitive, sensitiveWarning: normalizedSensitiveWarning } =
     normalizeContentWarning(isSensitive, sensitiveWarning);
  return await withTransaction(async (client) => {
@@ -84,10 +86,10 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
 
  // منشور عادي
  const result = await client.query(
- `INSERT INTO posts (user_id, content, media_urls, media_types, reply_to_id, quote_of_id, community_id, is_sensitive, sensitive_warning)
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ `INSERT INTO posts (user_id, content, media_urls, media_types, reply_to_id, quote_of_id, community_id, is_sensitive, sensitive_warning, visibility)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
  RETURNING *`,
- [userId, content, mediaUrls, mediaTypes, replyToId || null, quoteOfId || null, communityId || null, normalizedSensitive, normalizedSensitiveWarning]
+ [userId, content, mediaUrls, mediaTypes, replyToId || null, quoteOfId || null, communityId || null, normalizedSensitive, normalizedSensitiveWarning, normalizedVisibility]
  );
 
  const post = result.rows[0];
@@ -124,29 +126,27 @@ async function createPost({ userId, content, mediaUrls = [], mediaTypes = [], re
 
 // ─── جلب منشور واحد ───────────────────────────────────────────
 async function getPost(postId, viewerId = null) {
- const result = await query(
- `SELECT
- p.*,
- u.username, u.display_name, u.avatar_url, u.is_verified,
- ${viewerId ? `
- EXISTS(SELECT 1 FROM likes WHERE user_id=$2 AND post_id=p.id) AS liked_by_me,
- EXISTS(SELECT 1 FROM reposts WHERE user_id=$2 AND post_id=p.id) AS reposted_by_me,
- ` : 'FALSE AS liked_by_me, FALSE AS reposted_by_me,'}
- -- المنشور الأصلي إذا كان ردًا
- rp.content AS reply_to_content,
- ru.username AS reply_to_username,
- ru.display_name AS reply_to_display_name
- FROM posts p
- JOIN users u ON p.user_id = u.id
- LEFT JOIN posts rp ON p.reply_to_id = rp.id
- LEFT JOIN users ru ON rp.user_id = ru.id
- WHERE p.id = $1 AND p.is_deleted = FALSE`,
- viewerId ? [postId, viewerId] : [postId]
- );
+ let sql = `
+   SELECT
+   p.*,
+   u.username, u.display_name, u.avatar_url, u.is_verified,
+   ${viewerId ? `
+   EXISTS(SELECT 1 FROM likes WHERE user_id=$2 AND post_id=p.id) AS liked_by_me,
+   EXISTS(SELECT 1 FROM reposts WHERE user_id=$2 AND post_id=p.id) AS reposted_by_me,
+   ` : 'FALSE AS liked_by_me, FALSE AS reposted_by_me,'}
+   rp.content AS reply_to_content,
+   ru.username AS reply_to_username,
+   ru.display_name AS reply_to_display_name
+   FROM posts p
+   JOIN users u ON p.user_id = u.id
+   LEFT JOIN posts rp ON p.reply_to_id = rp.id
+   LEFT JOIN users ru ON rp.user_id = ru.id
+   WHERE p.id = $1 AND p.is_deleted = FALSE`;
+ if (viewerId) sql += buildVisibilityClause(2, { includeUnlisted: true });
 
+ const result = await query(sql, viewerId ? [postId, viewerId] : [postId]);
  if (!result.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
 
- // زيادة عداد المشاهدات
  query('UPDATE posts SET views_count = views_count + 1 WHERE id = $1', [postId]).catch(() => {});
 
  return result.rows[0];
