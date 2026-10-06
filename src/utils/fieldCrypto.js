@@ -25,7 +25,11 @@ const SECTION_CODE_ENV = {
   ios: 'DECRYPT_CODE_IOS',
 };
 
-const HASH_SECRET = process.env.EMAIL_HASH_SECRET || process.env.JWT_SECRET;
+function getHashSecret() {
+ const secret = process.env.EMAIL_HASH_SECRET;
+ if (!secret) throw new Error('EMAIL_HASH_SECRET غير مضبوط؛ لا يجوز استخدام JWT_SECRET كبديل');
+ return secret;
+}
 
 // ─── اشتقاق مفتاح AES-256 من كود القسم (مرة واحدة، بالذاكرة) ────
 const keyCache = new Map();
@@ -63,7 +67,7 @@ function decryptField({ enc, iv, tag }, section) {
 // الدخول والتحقق من تكرار البريد، بمفتاح منفصل عن مفاتيح الأقسام
 // (لو تسرّب هذا المفتاح وحده، ما يكفيش لفك تشفير أي بريد حقيقي) ──
 function hashEmailForLookup(email) {
-  return crypto.createHmac('sha256', HASH_SECRET).update(email.trim().toLowerCase()).digest('hex');
+  return crypto.createHmac('sha256', getHashSecret()).update(email.trim().toLowerCase()).digest('hex');
 }
 
 module.exports = { SECTIONS, encryptField, decryptField, hashEmailForLookup };
