@@ -19,6 +19,7 @@ router.post('/check-password-strength', controller.checkPasswordStrength);
 router.post('/exchange-impersonation-code', authLimiter, controller.exchangeImpersonationCode);
 
 // ─── مسارات محمية (تحتاج تسجيل دخول) ────────────────────────
+router.post('/ws-ticket', authenticate, controller.createWebSocketTicketController);
 router.post('/logout', authenticate, controller.logout);
 router.get('/me', authenticate, controller.me);
 
