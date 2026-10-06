@@ -73,10 +73,18 @@ async function login(req, res) {
     if (req.lockKey && err.code === 'INVALID_CREDENTIALS') {
       await recordFailedAttempt(req.lockKey);
     }
-    res.status(err.status || 500).json({
+    if (err.status && err.status < 500) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
+    logger.error('فشل تسجيل الدخول:', err);
+    return res.status(500).json({
       success: false,
-      message: err.message,
-      code: err.code,
+      message: 'تعذر تسجيل الدخول الآن. حاول مرة أخرى لاحقًا.',
+      code: 'LOGIN_FAILED',
     });
   }
 }
@@ -138,7 +146,7 @@ async function exchangeImpersonationCode(req, res) {
     const { client: redisClient } = require('../../config/redis');
     const key = `impersonation_code:${code}`;
     // GETDEL ذري: يقرأ ويحذف بعملية واحدة، يمنع استعمال نفس الكود مرتين
-    // بطلبين متزامنين (Redis >= 6.2). لو النسخة أقدم، fallback يدوي تحت.
+    // Redis >= 6.2. لو النسخة أقدم، fallback يدوي تحت.
     let accessToken;
     if (typeof redisClient.getDel === 'function') {
       accessToken = await redisClient.getDel(key);
