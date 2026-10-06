@@ -171,7 +171,16 @@ async function getMessages(conversationId, userId, page = 1, limit = 30) {
  u.username, u.display_name, u.avatar_url,
  EXISTS(SELECT 1 FROM message_reads WHERE message_id=m.id AND user_id=$2) AS read_by_me,
  (SELECT COUNT(*) FROM message_reads WHERE message_id=m.id) AS read_count,
- (SELECT COUNT(*) FROM message_deliveries WHERE message_id=m.id) AS delivered_count
+ (SELECT COUNT(*) FROM message_deliveries WHERE message_id=m.id) AS delivered_count,
+ COALESCE((
+   SELECT jsonb_agg(jsonb_build_object(
+     'messageId', e.message_id,
+     'keyId', e.key_id,
+     'encryptedMessageKey', e.encrypted_message_key
+   ))
+   FROM message_key_envelopes e
+   WHERE e.message_id = m.id AND e.recipient_user_id = $2
+ ), '[]'::jsonb) AS e2e_key_envelopes
  FROM messages m
  JOIN users u ON m.sender_id = u.id
  WHERE m.conversation_id = $1 AND m.is_deleted = FALSE
@@ -187,7 +196,7 @@ async function getMessages(conversationId, userId, page = 1, limit = 30) {
 }
 
 // ─── إرسال رسالة ─────────────────────────────────────────────
-async function sendMessage({ conversationId, senderId, encryptedContent, nonce, msgType = 'text', mediaUrl, replyToId, expiresIn }) {
+async function sendMessage({ conversationId, senderId, encryptedContent, nonce, msgType = 'text', mediaUrl, replyToId, expiresIn, encryptionVersion = 2, encryptionAlgorithm = 'RSA-OAEP-256', keyEnvelopes = [] }) {
  // تحقق العضوية
  const member = await query(
  `SELECT id FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
@@ -195,16 +204,64 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
  );
  if (!member.rows.length) throw { status: 403, message: 'لست عضواً في هذه المحادثة' };
 
- const expiresAt = expiresIn
+ if (![1, 2].includes(Number(encryptionVersion))) {
+  throw { status: 400, message: 'نسخة التشفير غير مدعومة', code: 'UNSUPPORTED_ENCRYPTION_VERSION' };
+ }
+
+ if (Number(encryptionVersion) === 1 && process.env.ALLOW_LEGACY_MESSAGE_ENCRYPTION !== 'true') {
+  throw { status: 426, message: 'يجب استخدام تشفير E2E الحديث لهذه الرسائل', code: 'E2E_REQUIRED' };
+ }
+
+ if (Number(encryptionVersion) === 2) {
+  if (encryptionAlgorithm !== 'RSA-OAEP-256') {
+   throw { status: 400, message: 'خوارزمية E2E غير مدعومة', code: 'UNSUPPORTED_E2E_ALGORITHM' };
+  }
+  if (!Array.isArray(keyEnvelopes)) {
+   throw { status: 400, message: 'مفاتيح الرسالة غير صالحة', code: 'INVALID_E2E_ENVELOPES' };
+  }
+
+  const members = await query(
+   `SELECT cm.user_id, k.id AS key_id
+    FROM conversation_members cm
+    LEFT JOIN user_e2e_keys k
+      ON k.user_id = cm.user_id AND k.revoked_at IS NULL
+    WHERE cm.conversation_id = $1`,
+   [conversationId]
+  );
+
+  const envelopeByUser = new Map();
+  for (const envelope of keyEnvelopes) {
+   if (envelopeByUser.has(envelope.recipientUserId)) {
+    throw { status: 400, message: 'يوجد envelope مكرر لنفس المستخدم', code: 'DUPLICATE_E2E_ENVELOPE' };
+   }
+   envelopeByUser.set(envelope.recipientUserId, envelope);
+  }
+
+  for (const row of members.rows) {
+   const envelope = envelopeByUser.get(row.user_id);
+   if (!row.key_id) {
+    throw { status: 428, message: 'بعض أعضاء المحادثة لم يسجلوا مفتاح E2E بعد', code: 'E2E_KEYS_INCOMPLETE' };
+   }
+   if (!envelope || envelope.keyId !== row.key_id) {
+    throw { status: 400, message: 'مفاتيح الرسالة لا تطابق مفاتيح أعضاء المحادثة', code: 'INVALID_E2E_ENVELOPES' };
+   }
+  }
+
+  if (envelopeByUser.size !== members.rows.length) {
+   throw { status: 400, message: 'لازم يكون للرسالة مفتاح مشفر لكل عضو في المحادثة', code: 'INVALID_E2E_ENVELOPES' };
+  }
+ }
+
+ const expiresAt
  ? new Date(Date.now() + expiresIn * 1000)
  : null;
 
  const result = await query(
  `INSERT INTO messages
- (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+ (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at, encryption_version, encryption_algorithm)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
  RETURNING *`,
- [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt]
+ [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt, Number(encryptionVersion), Number(encryptionVersion) === 2 ? encryptionAlgorithm : 'legacy']
  );
 
  const message = result.rows[0];
@@ -216,11 +273,21 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
  );
 
  // تحديث معاينة آخر رسالة ووقتها - تستخدمهما قائمة المحادثات للترتيب والعرض
- const previewText = msgType === 'text' ? encryptedContent.slice(0, 100) : `[${msgType}]`;
+ const previewText = Number(encryptionVersion) === 2 ? '[رسالة مشفّرة]' : (msgType === 'text' ? encryptedContent.slice(0, 100) : `[${msgType}]`);
  await query(
  `UPDATE conversations SET last_msg_at = NOW(), last_msg_text = $1 WHERE id = $2`,
  [previewText, conversationId]
  );
+
+ if (Number(encryptionVersion) === 2) {
+  for (const envelope of keyEnvelopes) {
+   await query(
+    `INSERT INTO message_key_envelopes (message_id, recipient_user_id, key_id, encrypted_message_key)
+     VALUES ($1, $2, $3, $4)`,
+    [message.id, envelope.recipientUserId, envelope.keyId, envelope.encryptedMessageKey]
+   );
+  }
+ }
 
  // زيادة عداد غير المقروء لباقي أعضاء المحادثة
  await query(
