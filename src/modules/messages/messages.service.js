@@ -197,17 +197,15 @@ async function getMessages(conversationId, userId, page = 1, limit = 30) {
 
 // ─── إرسال رسالة ─────────────────────────────────────────────
 async function sendMessage({ conversationId, senderId, encryptedContent, nonce, msgType = 'text', mediaUrl, replyToId, expiresIn, encryptionVersion = 2, encryptionAlgorithm = 'RSA-OAEP-256', keyEnvelopes = [] }) {
- // تحقق العضوية
  const member = await query(
- `SELECT id FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
- [conversationId, senderId]
+  `SELECT id FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+  [conversationId, senderId]
  );
  if (!member.rows.length) throw { status: 403, message: 'لست عضواً في هذه المحادثة' };
 
  if (![1, 2].includes(Number(encryptionVersion))) {
   throw { status: 400, message: 'نسخة التشفير غير مدعومة', code: 'UNSUPPORTED_ENCRYPTION_VERSION' };
  }
-
  if (Number(encryptionVersion) === 1 && process.env.ALLOW_LEGACY_MESSAGE_ENCRYPTION !== 'true') {
   throw { status: 426, message: 'يجب استخدام تشفير E2E الحديث لهذه الرسائل', code: 'E2E_REQUIRED' };
  }
@@ -246,58 +244,61 @@ async function sendMessage({ conversationId, senderId, encryptedContent, nonce, 
     throw { status: 400, message: 'مفاتيح الرسالة لا تطابق مفاتيح أعضاء المحادثة', code: 'INVALID_E2E_ENVELOPES' };
    }
   }
-
   if (envelopeByUser.size !== members.rows.length) {
    throw { status: 400, message: 'لازم يكون للرسالة مفتاح مشفر لكل عضو في المحادثة', code: 'INVALID_E2E_ENVELOPES' };
   }
  }
 
- const expiresAt
- ? new Date(Date.now() + expiresIn * 1000)
- : null;
+ const expiresAt = expiresIn
+  ? new Date(Date.now() + expiresIn * 1000)
+  : null;
+ const previewText = Number(encryptionVersion) === 2
+  ? '[رسالة مشفّرة]'
+  : (msgType === 'text' ? encryptedContent.slice(0, 100) : '[' + msgType + ']');
 
- const result = await query(
- `INSERT INTO messages
- (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at, encryption_version, encryption_algorithm)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
- RETURNING *`,
- [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt, Number(encryptionVersion), Number(encryptionVersion) === 2 ? encryptionAlgorithm : 'legacy']
- );
+ const message = await withTransaction(async (client) => {
+  const inserted = await client.query(
+   `INSERT INTO messages
+    (conversation_id, sender_id, encrypted_content, nonce, msg_type, media_url, reply_to_id, expires_at, encryption_version, encryption_algorithm)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    RETURNING *`,
+   [conversationId, senderId, encryptedContent, nonce, msgType, mediaUrl || null, replyToId || null, expiresAt, Number(encryptionVersion), Number(encryptionVersion) === 2 ? encryptionAlgorithm : 'legacy']
+  );
+  const created = inserted.rows[0];
 
- const message = result.rows[0];
+  await client.query(
+   `INSERT INTO message_reads (message_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+   [created.id, senderId]
+  );
 
- // وضع الرسالة كـ "مقروء"للمرسل نفسه
- await query(
- `INSERT INTO message_reads (message_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
- [message.id, senderId]
- );
+  await client.query(
+   `UPDATE conversations SET last_msg_at = NOW(), last_msg_text = $1 WHERE id = $2`,
+   [previewText, conversationId]
+  );
 
- // تحديث معاينة آخر رسالة ووقتها - تستخدمهما قائمة المحادثات للترتيب والعرض
- const previewText = Number(encryptionVersion) === 2 ? '[رسالة مشفّرة]' : (msgType === 'text' ? encryptedContent.slice(0, 100) : `[${msgType}]`);
- await query(
- `UPDATE conversations SET last_msg_at = NOW(), last_msg_text = $1 WHERE id = $2`,
- [previewText, conversationId]
- );
-
- if (Number(encryptionVersion) === 2) {
-  for (const envelope of keyEnvelopes) {
-   await query(
-    `INSERT INTO message_key_envelopes (message_id, recipient_user_id, key_id, encrypted_message_key)
-     VALUES ($1, $2, $3, $4)`,
-    [message.id, envelope.recipientUserId, envelope.keyId, envelope.encryptedMessageKey]
-   );
+  if (Number(encryptionVersion) === 2) {
+   for (const envelope of keyEnvelopes) {
+    await client.query(
+     `INSERT INTO message_key_envelopes (message_id, recipient_user_id, key_id, encrypted_message_key)
+      VALUES ($1, $2, $3, $4)`,
+     [created.id, envelope.recipientUserId, envelope.keyId, envelope.encryptedMessageKey]
+    );
+   }
   }
- }
 
- // زيادة عداد غير المقروء لباقي أعضاء المحادثة
- await query(
- `UPDATE conversation_members SET unread_count = unread_count + 1
- WHERE conversation_id = $1 AND user_id != $2`,
- [conversationId, senderId]
+  await client.query(
+   `UPDATE conversation_members SET unread_count = unread_count + 1
+    WHERE conversation_id = $1 AND user_id != $2`,
+   [conversationId, senderId]
+  );
+
+  return created;
+ });
+
+ const sender = await query(
+  `SELECT username, display_name, avatar_url FROM users WHERE id = $1`,
+  [senderId]
  );
-
- // بث الرسالة فورياً لباقي أعضاء المحادثة المتصلين
- const sender = await query(`SELECT username, display_name, avatar_url FROM users WHERE id = $1`, [senderId]);
  const { notifyNewMessage } = require('../websocket/publisher');
  notifyNewMessage(conversationId, message, sender.rows[0]).catch(() => {});
 
