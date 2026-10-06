@@ -29,17 +29,29 @@ function validatePublicKeyJwk(jwk) {
 
 async function registerPublicKey(userId, publicKeyJwk) {
   validatePublicKeyJwk(publicKeyJwk);
+
+  const current = await query(
+    `SELECT key_version
+     FROM user_e2e_keys
+     WHERE user_id = $1 AND revoked_at IS NULL
+     ORDER BY key_version DESC
+     LIMIT 1`,
+    [userId]
+  );
+  const nextVersion = (current.rows[0]?.key_version || 0) + 1;
+
+  await query(
+    `UPDATE user_e2e_keys
+     SET revoked_at = NOW(), updated_at = NOW()
+     WHERE user_id = $1 AND revoked_at IS NULL`,
+    [userId]
+  );
+
   const result = await query(
     `INSERT INTO user_e2e_keys (user_id, algorithm, public_key_jwk, key_version)
-     VALUES ($1, $2, $3, 1)
-     ON CONFLICT (user_id) DO UPDATE
-     SET public_key_jwk = EXCLUDED.public_key_jwk,
-         algorithm = EXCLUDED.algorithm,
-         key_version = user_e2e_keys.key_version + 1,
-         updated_at = NOW(),
-         revoked_at = NULL
+     VALUES ($1, $2, $3, $4)
      RETURNING id, user_id, algorithm, public_key_jwk, key_version, created_at, updated_at`,
-    [userId, SUPPORTED_ALGORITHM, JSON.stringify(publicKeyJwk)]
+    [userId, SUPPORTED_ALGORITHM, JSON.stringify(publicKeyJwk), nextVersion]
   );
   return result.rows[0];
 }
