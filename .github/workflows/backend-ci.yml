@@ -65,7 +65,16 @@ jobs:
         run: npm run migrate
 
       - name: Build syntax gate
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee ../build-output.txt
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-diagnostics
+          path: build-output.txt
 
       - name: Unit and schema tests
         run: npm test
