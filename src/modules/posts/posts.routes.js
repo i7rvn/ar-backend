@@ -17,7 +17,8 @@ const postLimiter = rateLimit({
 
 // ─── مسارات عامة (بدون تسجيل دخول إجباري) ───────────────────────
 router.get('/:id', optionalAuthenticate, controller.getPost);
-router.get('/:id/replies', controller.getReplies);
+router.get('/:id/replies', optionalAuthenticate, controller.getReplies);
+router.get('/:id/thread', optionalAuthenticate, controller.getThread);
 
 // ─── مسارات محمية ─────────────────────────────────────────────
 router.post('/', authenticate, postLimiter, controller.createPost);
