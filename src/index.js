@@ -63,6 +63,7 @@ const statsRoutes = require('./modules/stats/stats.routes');
 const wordFiltersRoutes = require('./modules/filters/wordFilters.routes');
 const linkPreviewRoutes = require('./modules/link-preview/linkPreview.routes');
 const e2eKeysRoutes = require('./modules/messages/e2eKeys.routes');
+const storiesRoutes = require('./modules/stories/stories.routes');
 ic=ic;
 
 // ─── Routes جديدة لدعم Admin Dashboard الكامل ───────────────────
@@ -176,6 +177,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/messages/e2e-keys', e2eKeysRoutes);
+app.use('/api/stories', storiesRoutes);
 
 // ─── Routes إضافية ──────────────────────────────────────────────
 app.use('/api/2fa', twofaRoutes);
