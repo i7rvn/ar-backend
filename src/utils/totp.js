@@ -1,4 +1,4 @@
-const { authenticator } = require('otplib');
+const { authenticator } = require('@otplib/v12-adapter');
 const QRCode = require('qrcode');
 
 authenticator.options = { window: 1 }; // يسمح بـ ±30 ثانية اختلاف بالساعة
