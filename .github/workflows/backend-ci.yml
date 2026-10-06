@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -48,6 +51,21 @@ jobs:
       JWT_SECRET: test-jwt-secret-only-for-ci
       JWT_REFRESH_SECRET: test-jwt-refresh-secret-only-for-ci
     steps:
+      - name: Sync lockfile for dependency migration
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          cd src
+          npm install --package-lock-only --ignore-scripts
+          cd ..
+          if git diff --quiet -- src/package-lock.json; then
+            echo "Lockfile already synchronized."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/package-lock.json
+            git commit -m "chore: synchronize npm lockfile"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
       - name: Checkout
         uses: actions/checkout@v4
 
