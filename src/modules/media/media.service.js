@@ -38,6 +38,11 @@ const upload = multer({
  limits: {
  fileSize: 20 * 1024 * 1024, // 20MB
  files: 4,
+ fields: 8,
+ fieldNameSize: 128,
+ fieldSize: 4096,
+ fieldNestingDepth: 5,
+ fieldArrayIndexLimit: 20,
  },
 });
 
