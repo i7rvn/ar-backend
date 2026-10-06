@@ -94,7 +94,7 @@ function extractMeta(html, key, attr = 'property') {
 function parsePreview(html, finalUrl) {
   const title = extractMeta(html, 'og:title') ||
     extractMeta(html, 'twitter:title') ||
-    ((html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1] || '').trim();
+    ((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').trim();
   const description = extractMeta(html, 'og:description') ||
     extractMeta(html, 'twitter:description') ||
     extractMeta(html, 'description', 'name');
