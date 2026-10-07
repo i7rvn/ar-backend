@@ -41,6 +41,7 @@ async function getForYouFeed(userId, page = 1, limit = 20) {
  AND p.repost_of_id IS NULL -- لا ريتويت في الفيد
  AND p.created_at > NOW() - INTERVAL '7 days'
  AND u.is_banned = FALSE
+ AND (u.is_private = FALSE OR u.id = $1 OR EXISTS (SELECT 1 FROM follows pf WHERE pf.follower_id = $1 AND pf.following_id = u.id))
  AND (p.user_id = $1 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $1))))
  AND NOT EXISTS (SELECT 1 FROM user_word_filters wf WHERE wf.user_id = $1 AND (wf.expires_at IS NULL OR wf.expires_at > NOW()) AND strpos(lower(p.content), wf.phrase) > 0)
  AND NOT EXISTS ( -- استثناء ثنائي الاتجاه: أنا حاظره أو هو حاظرني
@@ -134,6 +135,7 @@ async function getTrendingFeed(page = 1, limit = 20, viewerId = null) {
  AND p.reply_to_id IS NULL
  AND p.created_at > NOW() - INTERVAL '48 hours'
  AND u.is_banned = FALSE
+ AND ${viewerId ? "(u.is_private = FALSE OR u.id = $3 OR EXISTS (SELECT 1 FROM follows pf WHERE pf.follower_id = $3 AND pf.following_id = u.id))" : "u.is_private = FALSE"}
  ${viewerId ? "AND (p.user_id = $3 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $3))))" : "AND p.visibility = 'public'"}
  ${viewerId ? `AND NOT EXISTS (SELECT 1 FROM user_word_filters wf WHERE wf.user_id = $3 AND (wf.expires_at IS NULL OR wf.expires_at > NOW()) AND p.content ILIKE '%' || wf.phrase || '%')` : ''}
  ${blockCondition}
@@ -156,6 +158,13 @@ async function getUserPosts(targetUserId, viewerId = null, page = 1, limit = 20,
     : ', FALSE AS liked_by_me, FALSE AS reposted_by_me';
   const params = viewerId ? [targetUserId, limit, viewerId] : [targetUserId, limit];
 
+  const targetProfile = await query('SELECT is_private FROM users WHERE id = $1 AND is_banned = FALSE', [targetUserId]);
+  if (!targetProfile.rows.length) return [];
+  if (targetProfile.rows[0].is_private && viewerId !== targetUserId) {
+    if (!viewerId) return [];
+    const following = await query('SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2', [viewerId, targetUserId]);
+    if (!following.rows.length) return [];
+  }
   // إذا الزائر محظور من صاحب البروفايل أو العكس، ما يشوف حتى منشور واحد
   if (viewerId) {
     const blocked = await query(
@@ -185,6 +194,7 @@ async function getUserPosts(targetUserId, viewerId = null, page = 1, limit = 20,
      FROM posts p
      JOIN users u ON p.user_id = u.id
      ${whereAndJoin}
+     ${viewerId ? "AND (u.is_private = FALSE OR u.id = $3 OR EXISTS (SELECT 1 FROM follows pf WHERE pf.follower_id = $3 AND pf.following_id = u.id))" : "AND u.is_private = FALSE"}
      ${viewerId ? "AND (p.user_id = $3 OR p.visibility = 'public' OR p.visibility = 'unlisted' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3 AND f.following_id = p.user_id)) OR (p.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(p.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $3))))" : "AND p.visibility = 'public'"}
      ORDER BY ${orderBy}
      LIMIT $2 OFFSET ${offset}`,

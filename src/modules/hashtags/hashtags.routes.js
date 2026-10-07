@@ -18,7 +18,8 @@ router.get('/trending', asyncHandler(async (req, res) => {
  FROM hashtags h
  JOIN post_hashtags ph ON h.id = ph.hashtag_id
  JOIN posts p ON ph.post_id = p.id
- WHERE p.created_at > NOW() - INTERVAL '24 hours'
+ JOIN users u ON u.id = p.user_id
+ WHERE u.is_private = FALSE AND p.created_at > NOW() - INTERVAL '24 hours'
  AND p.is_deleted = FALSE
  GROUP BY h.id, h.tag, h.posts_count
  ORDER BY recent_posts DESC, h.posts_count DESC
@@ -44,7 +45,7 @@ router.get('/:tag', optionalAuthenticate, asyncHandler(async (req, res) => {
  JOIN post_hashtags ph ON p.id = ph.post_id
  JOIN hashtags h ON ph.hashtag_id = h.id
  WHERE h.tag = $1 AND p.is_deleted = FALSE AND u.is_banned = FALSE
- ${req.user ? buildVisibilityClause(4) : "AND p.visibility = 'public'"}
+ ${req.user ? buildVisibilityClause(4) : "AND p.visibility = 'public' AND u.is_private = FALSE"}
  ORDER BY p.created_at DESC
  LIMIT $2 OFFSET $3`,
  req.user ? [tag, limit, offset, req.user.id] : [tag, limit, offset]

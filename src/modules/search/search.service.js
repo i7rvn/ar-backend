@@ -32,7 +32,7 @@ async function search(q, type = 'all', page = 1, limit = 20, viewerId = null) {
               similarity(p.content, $1) AS relevance
        FROM posts p JOIN users u ON p.user_id = u.id
        WHERE p.content % $1 AND p.is_deleted = FALSE AND u.is_banned = FALSE
-       ${viewerId ? buildVisibilityClause(4) : "AND p.visibility = 'public'"}
+       ${viewerId ? buildVisibilityClause(4) : "AND p.visibility = 'public' AND u.is_private = FALSE"}
        ORDER BY relevance DESC, p.likes_count DESC
        LIMIT $2 OFFSET $3`,
       viewerId ? [q, limit, offset, viewerId] : [q, limit, offset]
