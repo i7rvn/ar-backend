@@ -37,7 +37,7 @@ async function saveHashtags(client, postId, content) {
 // ─── إنشاء منشور ──────────────────────────────────────────────
 async function assertPostAccessible(client, postId, userId) {
  const visible = await client.query(
-  `SELECT p.id FROM posts p
+  `SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id
    WHERE p.id = $1 AND p.is_deleted = FALSE
    ${buildVisibilityClause(2, { includeUnlisted: true })}`,
   [postId, userId]
@@ -253,7 +253,7 @@ async function getReplies(postId, viewerId = null, page = 1, limit = 20) {
  const ownerId = postOwner.rows[0]?.user_id;
  if (!ownerId) throw { status: 404, message: 'المنشور غير موجود' };
  const rootVisible = viewerId
- ? await query(`SELECT p.id FROM posts p WHERE p.id = $1 AND p.is_deleted = FALSE ${buildVisibilityClause(2, { includeUnlisted: true })}`, [postId, viewerId])
+ ? await query(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE ${buildVisibilityClause(2, { includeUnlisted: true })}`, [postId, viewerId])
  : await query(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE AND p.visibility IN ('public', 'unlisted') AND u.is_private = FALSE`, [postId]);
  if (!rootVisible.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
 
