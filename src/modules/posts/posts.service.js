@@ -160,7 +160,7 @@ async function getPost(postId, viewerId = null) {
    LEFT JOIN users ru ON rp.user_id = ru.id
    WHERE p.id = $1 AND p.is_deleted = FALSE`;
  if (viewerId) sql += buildVisibilityClause(2, { includeUnlisted: true });
- else sql += " AND p.visibility IN ('public', 'unlisted')";
+ else sql += " AND p.visibility IN ('public', 'unlisted') AND u.is_private = FALSE";
 
  const result = await query(sql, viewerId ? [postId, viewerId] : [postId]);
  if (!result.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
