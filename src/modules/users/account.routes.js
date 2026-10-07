@@ -5,7 +5,9 @@
 
 const express = require('express');
 const argon2 = require('argon2');
+const crypto = require('crypto');
 const { authenticate } = require('../../middleware/auth');
+const { otpLimiter } = require('../../middleware/rateLimit');
 const { query } = require('../../config/database');
 const { blacklistToken, setOTP, getOTP, deleteOTP, deleteCache } = require('../../config/redis');
 const { sendOTPEmail } = require('../../config/email');
@@ -61,7 +63,7 @@ router.put('/password', async (req, res) => {
 });
 
 // ─── تغيير البريد الإلكتروني (خطوتان: تأكيد البريد القديم ثم الجديد) ──
-router.post('/email/request-change', async (req, res) => {
+router.post('/email/request-change', otpLimiter, async (req, res) => {
   const { newEmail } = req.body;
 
   const { canRegisterWithEmail } = require('../users/linkedAccounts.service');
@@ -76,8 +78,8 @@ router.post('/email/request-change', async (req, res) => {
   const userResult = await query(`SELECT email FROM users WHERE id = $1`, [req.user.id]);
   const oldEmail = userResult.rows[0].email;
 
-  const otpOld = Math.floor(100000 + Math.random() * 900000).toString();
-  const otpNew = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpOld = crypto.randomInt(100000, 1000000).toString();
+  const otpNew = crypto.randomInt(100000, 1000000).toString();
 
   await setOTP(`email_change_old:${req.user.id}`, otpOld);
   await setOTP(`email_change_new:${req.user.id}`, otpNew);
@@ -89,7 +91,7 @@ router.post('/email/request-change', async (req, res) => {
   res.json({ success: true, message: 'تم إرسال رمزي تحقق إلى بريدك الحالي والجديد' });
 });
 
-router.post('/email/confirm-change', async (req, res) => {
+router.post('/email/confirm-change', otpLimiter, async (req, res) => {
   const { oldEmailCode, newEmailCode } = req.body;
 
   const storedOld = await getOTP(`email_change_old:${req.user.id}`);
