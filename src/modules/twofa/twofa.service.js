@@ -59,7 +59,15 @@ async function readAndUpgradeSecret(userId) {
  if (!result.rows.length) return null;
 
  const stored = result.rows[0].secret_enc;
- const secret = decrypt(stored);
+ let secret;
+ try {
+  secret = decrypt(stored);
+ } catch {
+  const error = new Error('تعذرت قراءة إعداد المصادقة الثنائية لهذا الحساب. يلزم التحقق من الهوية وإعادة ضبط 2FA بأمان.');
+  error.status = 409;
+  error.code = 'TOTP_SECRET_RESET_REQUIRED';
+  throw error;
+ }
 
  if (!stored.startsWith('gcm:v1:')) {
   await query(

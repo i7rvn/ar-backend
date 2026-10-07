@@ -8,6 +8,27 @@ const { getCache, setCache, deleteCache } = require('../../config/redis');
 
 const router = express.Router();
 
+// Public preflight only; registration still performs the authoritative uniqueness check.
+router.get('/username-availability', async (req, res) => {
+  const username = String(req.query.username || '').trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,50}$/.test(username)) {
+    return res.status(400).json({ success: false, message: 'اسم المستخدم يجب أن يكون من 3 إلى 50 حرفاً أو رقماً أو شرطة سفلية', code: 'INVALID_USERNAME' });
+  }
+
+  try {
+    const result = await query(
+      `SELECT
+         EXISTS (SELECT 1 FROM users WHERE LOWER(username) = $1) AS taken,
+         EXISTS (SELECT 1 FROM reserved_usernames WHERE LOWER(username) = $1) AS reserved`,
+      [username]
+    );
+    const available = !result.rows[0].taken && !result.rows[0].reserved;
+    res.json({ success: true, data: { available } });
+  } catch {
+    res.status(500).json({ success: false, message: 'تعذر التحقق من اسم المستخدم الآن', code: 'USERNAME_CHECK_FAILED' });
+  }
+});
+
 // ─── البحث عن مستخدمين ────────────────────────────────────────
 // يجب أن يسبق /:username؛ وإلا سيُفسَّر GET /search كأنه ملف
 // شخصي للمستخدم الذي اسمه "search".
