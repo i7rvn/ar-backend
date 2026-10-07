@@ -1,14 +1,11 @@
 const { query } = require('../../config/database');
+const { buildVisibilityClause } = require('./postVisibility');
 
 async function getPostThread(postId, viewerId = null, limit = 200) {
-  const root = await query('SELECT p.id, p.user_id, u.is_private FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE', [postId]);
+  const root = viewerId
+    ? await query(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE ${buildVisibilityClause(2, { includeUnlisted: true })}`, [postId, viewerId])
+    : await query(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE AND p.visibility = 'public' AND u.is_private = FALSE`, [postId]);
   if (!root.rows.length) throw { status: 404, message: 'المنشور غير موجود', code: 'POST_NOT_FOUND' };
-  if (root.rows[0].is_private && root.rows[0].user_id !== viewerId) {
-    if (!viewerId) throw { status: 404, message: 'المنشور غير موجود', code: 'POST_NOT_FOUND' };
-    const following = await query('SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2', [viewerId, root.rows[0].user_id]);
-    if (!following.rows.length) throw { status: 404, message: 'المنشور غير موجود', code: 'POST_NOT_FOUND' };
-  }
-
   const params = viewerId ? [postId, viewerId, Math.min(Math.max(Number(limit) || 200, 1), 200)] : [postId, Math.min(Math.max(Number(limit) || 200, 1), 200)];
   const visibility = viewerId
     ? "AND (t.is_private = FALSE OR t.user_id = $2 OR EXISTS (SELECT 1 FROM follows pf WHERE pf.follower_id = $2 AND pf.following_id = t.user_id)) AND (t.user_id = $2 OR t.visibility = 'public' OR t.visibility = 'unlisted' OR (t.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.following_id = t.user_id)) OR (t.visibility = 'mentioned' AND EXISTS (SELECT 1 FROM regexp_matches(t.content, '@([A-Za-z0-9_\\u0600-\\u06FF]+)', 'g') AS mention(match) WHERE lower(mention.match[1]) = (SELECT lower(u2.username) FROM users u2 WHERE u2.id = $2))))"
