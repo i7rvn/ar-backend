@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
   const days = parseInt(req.query.days) === 28 ? 28 : 7;
   const userId = req.user.id;
 
-  const [impressions, previousImpressions, engagement, profileVisits, previousProfileVisits, newFollowers, previousNewFollowers] =
+  const [impressions, previousImpressions, engagement, previousEngagement, profileVisits, previousProfileVisits, newFollowers, previousNewFollowers] =
     await Promise.all([
       query(
         `SELECT COUNT(*) FROM post_views pv JOIN posts p ON p.id = pv.post_id
@@ -32,6 +32,14 @@ router.get('/', async (req, res) => {
            (SELECT COUNT(*) FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.user_id = $1 AND l.created_at >= NOW() - INTERVAL '1 day' * $2) +
            (SELECT COUNT(*) FROM reposts r JOIN posts p ON p.id = r.post_id WHERE p.user_id = $1 AND r.created_at >= NOW() - INTERVAL '1 day' * $2) +
            (SELECT COUNT(*) FROM posts WHERE reply_to_id IN (SELECT id FROM posts WHERE user_id = $1) AND created_at >= NOW() - INTERVAL '1 day' * $2)
+           AS total`,
+        [userId, days]
+      ),
+      query(
+        `SELECT
+           (SELECT COUNT(*) FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.user_id = $1 AND l.created_at >= NOW() - INTERVAL '1 day' * $2 * 2 AND l.created_at < NOW() - INTERVAL '1 day' * $2) +
+           (SELECT COUNT(*) FROM reposts r JOIN posts p ON p.id = r.post_id WHERE p.user_id = $1 AND r.created_at >= NOW() - INTERVAL '1 day' * $2 * 2 AND r.created_at < NOW() - INTERVAL '1 day' * $2) +
+           (SELECT COUNT(*) FROM posts WHERE reply_to_id IN (SELECT id FROM posts WHERE user_id = $1) AND created_at >= NOW() - INTERVAL '1 day' * $2 * 2 AND created_at < NOW() - INTERVAL '1 day' * $2)
            AS total`,
         [userId, days]
       ),
@@ -75,7 +83,7 @@ router.get('/', async (req, res) => {
     success: true,
     period: `${days}d`,
     impressions: withChange(impressions.rows[0].count, previousImpressions.rows[0].count),
-    engagement: withChange(engagement.rows[0].total, 0),
+    engagement: withChange(engagement.rows[0].total, previousEngagement.rows[0].total),
     profileVisits: withChange(profileVisits.rows[0].count, previousProfileVisits.rows[0].count),
     newFollowers: withChange(newFollowers.rows[0].count, previousNewFollowers.rows[0].count),
     topPosts: topPosts.rows,
