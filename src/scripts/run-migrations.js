@@ -81,9 +81,9 @@ function isHarmlessError(message) {
   return /already exists|duplicate key|does not exist.*skipping/i.test(message);
 }
 
-async function runFile(file, sql) {
+async function runFile(file, sql, client) {
   try {
-    await pool.query(sql);
+    await client.query(sql);
     console.log(`تم بنجاح (دفعة واحدة): ${file}`);
     return;
   } catch (err) {
@@ -98,7 +98,7 @@ async function runFile(file, sql) {
 
   for (const statement of statements) {
     try {
-      await pool.query(statement);
+      await client.query(statement);
     } catch (err) {
       if (isHarmlessError(err.message)) {
         console.log(`  تجاوز (موجود مسبقاً): ${statement.slice(0, 60)}...`);
@@ -129,29 +129,62 @@ async function runMigrations() {
 
   console.log(`عدد ملفات الترحيل: ${files.length}`);
 
-  for (const file of files) {
-    const filePath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(filePath, 'utf8');
-    console.log(`تشغيل: ${file} ...`);
-    await runFile(file, sql);
+  const client = await pool.connect();
+  let lockAcquired = false;
+
+  try {
+    await client.query('SELECT pg_advisory_lock($1, $2)', [1095916873, 1]);
+    lockAcquired = true;
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ar_schema_migrations (
+        filename TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    const appliedResult = await client.query('SELECT filename FROM ar_schema_migrations');
+    const appliedFiles = new Set(appliedResult.rows.map((row) => row.filename));
+
+    for (const file of files) {
+      if (appliedFiles.has(file)) {
+        console.log(`تجاوز الترحيل المطبق مسبقاً: ${file}`);
+        continue;
+      }
+
+      const filePath = path.join(migrationsDir, file);
+      const sql = fs.readFileSync(filePath, 'utf8');
+      console.log(`تشغيل: ${file} ...`);
+      await runFile(file, sql, client);
+      await client.query(
+        'INSERT INTO ar_schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING',
+        [file],
+      );
+    }
+
+    console.log('انتهى تشغيل كل ملفات الترحيل.');
+  } finally {
+    if (lockAcquired) {
+      try {
+        await client.query('SELECT pg_advisory_unlock($1, $2)', [1095916873, 1]);
+      } catch (unlockError) {
+        console.error('تعذر تحرير قفل الترحيلات:', unlockError.message);
+      }
+    }
+    client.release();
   }
 
-  console.log('انتهى تشغيل كل ملفات الترحيل.');
-  // pool.end() يصير فقط لما هذا الملف يتشغّل من CLI مباشرة (node
-  // run-migrations.js) — لو استُدعي كموديول من index.js (Render free
-  // tier بلا Shell/pre-deploy command)، ما نقفلوش الـ pool، والسيرفر
-  // هو اللي يكمّل يستعمل اتصاله الخاص بيه عادي
   if (require.main === module) {
     await pool.end();
   }
 }
-
 // وضعين: CLI مباشر (node scripts/run-migrations.js) يقفل العملية عند
 // النهاية/الخطأ؛ أو require() من index.js (بوتستراب تلقائي بالإقلاع
 // على منصات بلا Shell زي Render Free) يرجّع Promise عادي بلا exit
 if (require.main === module) {
-  runMigrations().catch((err) => {
+  runMigrations().catch(async (err) => {
     console.log('خطأ عام:', err.message);
+    await pool.end();
     process.exit(1);
   });
 }

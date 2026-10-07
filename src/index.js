@@ -223,18 +223,11 @@ async function start() {
     // docker-entrypoint-initdb.d، فما تحتاجوش هنا (اختياري كيفما تحب).
     if (process.env.AUTO_MIGRATE_AND_SEED === 'true') {
       logger.info('AUTO_MIGRATE_AND_SEED مفعّل — تشغيل migrations + seed-owner...');
-      try {
-        const { runMigrations } = require('./scripts/run-migrations');
-        await runMigrations();
-        const { main: seedMain } = require('./scripts/seed-owner');
-        await seedMain();
-        logger.info('انتهى البوتستراب التلقائي بنجاح.');
-      } catch (bootstrapErr) {
-        logger.error('فشل البوتستراب التلقائي (migrations/seed):', bootstrapErr.message);
-        // ما نوقفوش السيرفر بالكامل هنا — لو migrations اتطبّقت مسبقاً
-        // بطريقة يدوية، فشل جزء منها لاحقاً (مثلاً كود تعديل خفيف)
-        // ماشي سبب كافي يمنع السيرفر من الإقلاع أصلاً
-      }
+      const { runMigrations } = require('./scripts/run-migrations');
+      await runMigrations();
+      const { main: seedMain } = require('./scripts/seed-owner');
+      await seedMain();
+      logger.info('انتهى البوتستراب التلقائي بنجاح.');
     }
 
     attachWebSocketServer(httpServer);
