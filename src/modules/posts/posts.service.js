@@ -254,12 +254,12 @@ async function getReplies(postId, viewerId = null, page = 1, limit = 20) {
  if (!ownerId) throw { status: 404, message: 'المنشور غير موجود' };
  const rootVisible = viewerId
  ? await query(`SELECT p.id FROM posts p WHERE p.id = $1 AND p.is_deleted = FALSE ${buildVisibilityClause(2, { includeUnlisted: true })}`, [postId, viewerId])
- : await query(`SELECT p.id FROM posts p WHERE p.id = $1 AND p.is_deleted = FALSE AND p.visibility IN ('public', 'unlisted')`, [postId]);
+ : await query(`SELECT p.id FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = $1 AND p.is_deleted = FALSE AND p.visibility IN ('public', 'unlisted') AND u.is_private = FALSE`, [postId]);
  if (!rootVisible.rows.length) throw { status: 404, message: 'المنشور غير موجود' };
 
  // ownerId مصدره عمود UUID من قاعدة بياناتنا (ماشي مُدخَل مستخدم
  // مباشر)، فحقنه بالنص هنا آمن؛ viewerId يبقى دايماً parameter مُقيَّم
- const visibilityCondition = viewerId ? buildVisibilityClause(3, { includeUnlisted: true }) : "AND p.visibility IN ('public', 'unlisted')";
+ const visibilityCondition = viewerId ? buildVisibilityClause(3, { includeUnlisted: true }) : "AND p.visibility IN ('public', 'unlisted') AND u.is_private = FALSE";
 
  const restrictCondition = (ownerId && viewerId)
  ? `AND (
