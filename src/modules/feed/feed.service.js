@@ -156,6 +156,13 @@ async function getUserPosts(targetUserId, viewerId = null, page = 1, limit = 20,
     : ', FALSE AS liked_by_me, FALSE AS reposted_by_me';
   const params = viewerId ? [targetUserId, limit, viewerId] : [targetUserId, limit];
 
+  const targetProfile = await query('SELECT is_private FROM users WHERE id = $1 AND is_banned = FALSE', [targetUserId]);
+  if (!targetProfile.rows.length) return [];
+  if (targetProfile.rows[0].is_private && viewerId !== targetUserId) {
+    if (!viewerId) return [];
+    const following = await query('SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2', [viewerId, targetUserId]);
+    if (!following.rows.length) return [];
+  }
   // إذا الزائر محظور من صاحب البروفايل أو العكس، ما يشوف حتى منشور واحد
   if (viewerId) {
     const blocked = await query(
