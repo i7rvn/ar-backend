@@ -5,7 +5,7 @@
 
 const express = require('express');
 const { authenticate } = require('../../middleware/auth');
-const { query } = require('../../config/database');
+const { query, withTransaction } = require('../../config/database');
 const { deleteCachePattern } = require('../../config/redis');
 
 const router = express.Router();
@@ -34,15 +34,25 @@ router.post('/block/:username', async (req, res) => {
     return res.status(400).json({ success: false, message: 'لا يمكن حظر النفس' });
   }
 
-  await query(
-    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [req.user.id, targetId]
-  );
-  // الحظر يزيل المتابعة بالاتجاهين تلقائياً
-  await query(
-    `DELETE FROM follows WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)`,
-    [req.user.id, targetId]
-  );
+  await withTransaction(async (client) => {
+    const lockedUserIds = [req.user.id, targetId].sort();
+    await client.query(
+      'SELECT id FROM users WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE',
+      [lockedUserIds]
+    );
+    await client.query(
+      `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [req.user.id, targetId]
+    );
+    await client.query(
+      `DELETE FROM follows WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)`,
+      [req.user.id, targetId]
+    );
+    await client.query(
+      `DELETE FROM follow_requests WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)`,
+      [req.user.id, targetId]
+    );
+  });
 
   res.json({ success: true, message: 'تم حظر المستخدم' });
   await invalidateFeedCache(req.user.id);
@@ -141,3 +151,4 @@ router.get('/restricted', async (req, res) => {
 });
 
 module.exports = router;
+
