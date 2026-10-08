@@ -9,16 +9,20 @@ const argon2 = require('argon2');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT) || 5432,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: process.env.DB_HOST && !process.env.DB_HOST.includes('localhost')
-    ? { rejectUnauthorized: false }
-    : false,
-});
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
+    : {
+        host: process.env.DB_HOST,
+        port: parseInt(process.env.DB_PORT) || 5432,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        ssl: process.env.DB_HOST && !process.env.DB_HOST.includes('localhost')
+          ? { rejectUnauthorized: false }
+          : false,
+      }
+);
 
 async function seedOwner() {
  const email = process.env.ADMIN_EMAIL;

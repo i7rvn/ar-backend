@@ -78,7 +78,7 @@ function splitStatements(sql) {
 }
 
 function isHarmlessError(message) {
-  return /already exists|duplicate key|does not exist.*skipping/i.test(message);
+  return /already exists|does not exist.*skipping/i.test(message);
 }
 
 async function runFile(file, sql, client) {
@@ -190,3 +190,4 @@ if (require.main === module) {
 }
 
 module.exports = { runMigrations };
+

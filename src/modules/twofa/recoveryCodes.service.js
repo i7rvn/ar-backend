@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const argon2 = require('argon2'); // نفس خوارزم كلمات المرور (Argon2id) المستخدم بالمشروع كامل
 const { query } = require('../../config/database');
+const { consumeMatchingCode } = require('../../utils/recoveryCodeClaim');
 
 // توليد 10 أكواد احتياطية — تُعرض للمستخدم مرة واحدة فقط، ونخزّن الـ hash برك
 async function generateRecoveryCodes(userId) {
@@ -27,13 +28,14 @@ async function consumeRecoveryCode(userId, code) {
  [userId]
  );
 
- for (const row of result.rows) {
- if (await argon2.verify(row.code_hash, code)) {
- await query(`UPDATE recovery_codes SET used = TRUE, used_at = NOW() WHERE id = $1`, [row.id]);
- return true;
- }
- }
- return false;
+ return consumeMatchingCode(result.rows, code, argon2.verify, async (rowId) => {
+  const claimed = await query(
+   `UPDATE recovery_codes SET used = TRUE, used_at = NOW()
+    WHERE id = $1 AND user_id = $2 AND used = FALSE RETURNING id`,
+   [rowId, userId]
+  );
+  return claimed.rowCount === 1;
+ });
 }
 
 async function remainingCodesCount(userId) {
@@ -45,3 +47,4 @@ async function remainingCodesCount(userId) {
 }
 
 module.exports = { generateRecoveryCodes, consumeRecoveryCode, remainingCodesCount };
+
