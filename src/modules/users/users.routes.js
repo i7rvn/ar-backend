@@ -76,8 +76,14 @@ router.get('/suggestions', authenticate, async (req, res) => {
            WHERE f.follower_id = $1 AND f.following_id = u.id
          )
          AND NOT EXISTS (
+           SELECT 1 FROM follow_requests fr
+           WHERE (fr.follower_id = $1 AND fr.following_id = u.id)
+              OR (fr.follower_id = u.id AND fr.following_id = $1)
+         )
+         AND NOT EXISTS (
            SELECT 1 FROM user_blocks b
-           WHERE b.blocker_id = $1 AND b.blocked_id = u.id
+           WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+              OR (b.blocker_id = u.id AND b.blocked_id = $1)
          )
        ORDER BY u.followers_count DESC, u.created_at DESC
        LIMIT $2`,
@@ -128,6 +134,23 @@ router.get('/:username/mutual-followers', authenticate, async (req, res) => {
       return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
     }
     const targetId = target.rows[0].id;
+
+    const access = await query(
+      `SELECT is_private FROM users WHERE id = $1 AND is_banned = FALSE`,
+      [targetId]
+    );
+    if (!access.rows.length) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+    if (access.rows[0].is_private && targetId !== req.user.id) {
+      const following = await query(
+        `SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2`,
+        [req.user.id, targetId]
+      );
+      if (!following.rows.length) {
+        return res.status(403).json({ success: false, message: 'هذا الحساب خاص', code: 'PRIVATE_PROFILE' });
+      }
+    }
 
     if (targetId === req.user.id) {
       return res.json({ success: true, data: { users: [], total: 0 } }); // ما فيه معنى لملفي أنا
@@ -182,24 +205,30 @@ router.get('/:username', optionalAuthenticate, async (req, res) => {
 
  // حساب إمكانية رؤية المنشورات لحساب خاص - يُحسَب طرياً بلا كاش
  // لأنه يعتمد على هوية الزائر نفسه، بعكس بيانات الملف الشخصي العامة
- let canViewPosts = true;
+ let canViewPosts = !user.is_private || Boolean(req.user && req.user.id === user.id);
  let isFollowing = false;
- if (user.is_private && req.user && req.user.id !== user.id) {
+ let followRequestPending = false;
+ if (req.user && req.user.id !== user.id) {
  const follow = await query(
- `SELECT id FROM follows WHERE follower_id = $1 AND following_id = $2`,
+ `SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2`,
  [req.user.id, user.id]
  );
  isFollowing = follow.rows.length > 0;
- canViewPosts = isFollowing;
- } else if (user.is_private && !req.user) {
- canViewPosts = false;
+ if (user.is_private && !isFollowing) {
+ const request = await query(
+ `SELECT 1 FROM follow_requests WHERE follower_id = $1 AND following_id = $2`,
+ [req.user.id, user.id]
+ );
+ followRequestPending = request.rows.length > 0;
+ }
+ canViewPosts = !user.is_private || isFollowing;
  }
 
  if (req.user && req.user.id !== user.id) {
  query(`INSERT INTO profile_views (profile_user_id, viewer_id) VALUES ($1, $2)`, [user.id, req.user.id]).catch(() => {});
  }
 
- res.json({ success: true, data: { ...user, isFollowing, canViewPosts } });
+ res.json({ success: true, data: { ...user, isFollowing, followRequestPending, canViewPosts } });
  } catch (err) {
  res.status(500).json({ success: false, message: 'خطأ في السرفر' });
  }
@@ -254,3 +283,4 @@ router.put('/profile', authenticate, validate('updateProfile'), async (req, res)
 });
 
 module.exports = router;
+

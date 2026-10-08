@@ -7,6 +7,7 @@ const { query } = require('../../config/database');
 const PREFERENCE_COLUMN = {
   like: 'likes',
   follow: 'follows',
+  follow_request: 'follows',
   reply: 'replies',
   repost: 'reposts',
   community_post: 'community_posts',
@@ -38,3 +39,4 @@ async function createNotification({ userId, actorId, type, postId = null }) {
 }
 
 module.exports = { createNotification };
+
